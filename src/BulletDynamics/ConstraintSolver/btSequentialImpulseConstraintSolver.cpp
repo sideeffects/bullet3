@@ -915,7 +915,7 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
 						solverConstraint.m_rhs = velocityImpulse;
 						solverConstraint.m_rhsPenetration = penetrationImpulse;
 					}
-					solverConstraint.m_cfm = 0.f;
+					solverConstraint.m_cfm = infoGlobal.m_globalCfm;
 					solverConstraint.m_lowerLimit = 0;
 					solverConstraint.m_upperLimit = 1e10f;
 				}
