@@ -29,6 +29,7 @@ OPTION(BUILD_SHARED_LIBS "Use shared libraries" OFF)
 
 OPTION(USE_MSVC_INCREMENTAL_LINKING "Use MSVC Incremental Linking" OFF)
 OPTION(USE_CUSTOM_VECTOR_MATH "Use custom vectormath library" OFF)
+OPTION(BUILD_MULTITHREADING "Use BulletMultiThreading" ON)
 
 #statically linking VC++ isn't supported for WindowsPhone/WindowsStore
 IF (CMAKE_SYSTEM_NAME STREQUAL WindowsPhone OR CMAKE_SYSTEM_NAME STREQUAL WindowsStore)
