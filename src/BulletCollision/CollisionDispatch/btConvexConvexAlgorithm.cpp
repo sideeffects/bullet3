@@ -183,7 +183,6 @@ btConvexConvexAlgorithm::CreateFunc::CreateFunc(btSimplexSolverInterface*			simp
 {
 	m_numPerturbationIterations = 0;
 	m_minimumPointsPerturbationThreshold = 3;
-	m_simplexSolver = simplexSolver;
 	m_pdSolver = pdSolver;
 }
 
@@ -193,7 +192,6 @@ btConvexConvexAlgorithm::CreateFunc::~CreateFunc()
 
 btConvexConvexAlgorithm::btConvexConvexAlgorithm(btPersistentManifold* mf,const btCollisionAlgorithmConstructionInfo& ci,const btCollisionObjectWrapper* body0Wrap,const btCollisionObjectWrapper* body1Wrap,btSimplexSolverInterface* simplexSolver, btConvexPenetrationDepthSolver* pdSolver,int numPerturbationIterations, int minimumPointsPerturbationThreshold)
 : btActivatingCollisionAlgorithm(ci,body0Wrap,body1Wrap),
-m_simplexSolver(simplexSolver),
 m_pdSolver(pdSolver),
 m_ownManifold (false),
 m_manifoldPtr(mf),
@@ -350,7 +348,11 @@ void btConvexConvexAlgorithm ::processCollision (const btCollisionObjectWrapper*
 	
 	btGjkPairDetector::ClosestPointInput input;
 
-	btGjkPairDetector	gjkPairDetector(min0,min1,m_simplexSolver,m_pdSolver);
+        // Don't share the btVoronoiSimplexSolver between multiple
+        // btConvexConvexAlgorithm's, as that is problematic for multi-threaded
+        // collision detection.
+        btVoronoiSimplexSolver simplexSolver;
+	btGjkPairDetector	gjkPairDetector(min0,min1,&simplexSolver,m_pdSolver);
 	//TODO: if (dispatchInfo.m_useContinuous)
 	gjkPairDetector.setMinkowskiA(min0);
 	gjkPairDetector.setMinkowskiB(min1);
