@@ -716,40 +716,50 @@ btSolverConstraint&	btSequentialImpulseConstraintSolver::addRollingFrictionConst
 
 int	btSequentialImpulseConstraintSolver::getOrInitSolverBody(btCollisionObject& body,btScalar timeStep)
 {
+        int id = body.getCompanionId();
 
-	int solverBodyIdA = -1;
+        if (id < 0)
+        {
+            if (body.isStaticObject())
+            {
+                // Static object - use the shared fixed body.
+                if (m_fixedBodyId < 0)
+                {
+                    m_fixedBodyId = m_tmpSolverBodyPool.size();
+                    btSolverBody &fixedBody = m_tmpSolverBodyPool.expand();
+                    initSolverBody(&fixedBody, 0, timeStep);
+                }
+                return m_fixedBodyId;
+            }
+            else if (body.isKinematicObject())
+            {
+                // Kinematic and static objects do not merge islands, so they
+                // may be referenced by constraints in different islands. Thus,
+                // writing to the companion id is unsafe if we're
+                // multithreading.
+                const int *index = m_kinematicSolverBodies.find(&body);
+                if (index)
+                    id = *index;
+                else
+                {
+                    id = m_tmpSolverBodyPool.size();
+                    btSolverBody &solverBody = m_tmpSolverBodyPool.expand();
+                    initSolverBody(&solverBody, &body, timeStep);
+                    m_kinematicSolverBodies.insert(&body, id);
+                }
+            }
+            else
+            {
+                // An active object we haven't seen before.
+                id = m_tmpSolverBodyPool.size();
+                btSolverBody &solverBody = m_tmpSolverBodyPool.expand();
+                initSolverBody(&solverBody, &body, timeStep);
+                body.setCompanionId(id);
+            }
+        }
 
-	if (body.getCompanionId() >= 0)
-	{
-		//body has already been converted
-		solverBodyIdA = body.getCompanionId();
-        btAssert(solverBodyIdA < m_tmpSolverBodyPool.size());
-	} else
-	{
-		btRigidBody* rb = btRigidBody::upcast(&body);
-		//convert both active and kinematic objects (for their velocity)
-		if (rb && (rb->getInvMass() || rb->isKinematicObject()))
-		{
-			solverBodyIdA = m_tmpSolverBodyPool.size();
-			btSolverBody& solverBody = m_tmpSolverBodyPool.expand();
-			initSolverBody(&solverBody,&body,timeStep);
-			body.setCompanionId(solverBodyIdA);
-		} else
-		{
-
-			if (m_fixedBodyId<0)
-			{
-				m_fixedBodyId = m_tmpSolverBodyPool.size();
-				btSolverBody& fixedBody = m_tmpSolverBodyPool.expand();
-				initSolverBody(&fixedBody,0,timeStep);
-			}
-			return m_fixedBodyId;
-//			return 0;//assume first one is a fixed solver body
-		}
-	}
-
-	return solverBodyIdA;
-
+        btAssert(id < m_tmpSolverBodyPool.size());
+        return id;
 }
 #include <stdio.h>
 
@@ -1862,7 +1872,7 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlyFinish(btCo
 	for ( i=0;i<m_tmpSolverBodyPool.size();i++)
 	{
 		btRigidBody* body = m_tmpSolverBodyPool[i].m_originalBody;
-		if (body)
+		if (body && !body->isStaticOrKinematicObject())
 		{
 			if (infoGlobal.m_splitImpulse)
 				m_tmpSolverBodyPool[i].writebackVelocityAndTransform(infoGlobal.m_timeStep, infoGlobal.m_splitImpulseTurnErp);
@@ -1890,6 +1900,7 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlyFinish(btCo
 	m_tmpSolverContactRollingFrictionConstraintPool.resizeNoInitialize(0);
 
 	m_tmpSolverBodyPool.resizeNoInitialize(0);
+        m_kinematicSolverBodies.clear();
 	return 0.f;
 }
 

@@ -26,6 +26,7 @@ class btCollisionObject;
 #include "BulletDynamics/ConstraintSolver/btSolverConstraint.h"
 #include "BulletCollision/NarrowPhaseCollision/btManifoldPoint.h"
 #include "BulletDynamics/ConstraintSolver/btConstraintSolver.h"
+#include "LinearMath/btHashMap.h"
 
 typedef btSimdScalar(*btSingleConstraintRowSolver)(btSolverBody&, btSolverBody&, const btSolverConstraint&);
 
@@ -34,6 +35,7 @@ ATTRIBUTE_ALIGNED16(class) btSequentialImpulseConstraintSolver : public btConstr
 {
 protected:
 	btAlignedObjectArray<btSolverBody>      m_tmpSolverBodyPool;
+        btHashMap<btHashPtr, int> m_kinematicSolverBodies;
 	btConstraintArray			m_tmpSolverContactConstraintPool;
 	btConstraintArray			m_tmpSolverNonContactConstraintPool;
 	btConstraintArray			m_tmpSolverContactFrictionConstraintPool;
