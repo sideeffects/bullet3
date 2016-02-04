@@ -899,6 +899,10 @@ void btGImpactCollisionAlgorithm::processCollision (const btCollisionObjectWrapp
 
 		gimpact_vs_shape(body1Wrap,body0Wrap,gimpactshape1,body0Wrap->getCollisionShape(),true);
 	}
+
+        // Ensure that gContactProcessedCallback is called for concave shapes.
+        if (getLastManifold())
+            m_resultOut->refreshContactPoints();
 }
 
 
