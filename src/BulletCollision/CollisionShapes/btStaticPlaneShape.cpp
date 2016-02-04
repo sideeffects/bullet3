@@ -33,27 +33,40 @@ btStaticPlaneShape::~btStaticPlaneShape()
 }
 
 
-
-void btStaticPlaneShape::getAabb(const btTransform& t,btVector3& aabbMin,btVector3& aabbMax) const
+/// Zero out any entries that are approximately zero.
+SIMD_FORCE_INLINE btVector3
+btRoundZero(const btVector3 &vec, btScalar tol = 0.00001)
 {
-	(void)t;
-	/*
-	btVector3 infvec (btScalar(BT_LARGE_FLOAT),btScalar(BT_LARGE_FLOAT),btScalar(BT_LARGE_FLOAT));
+    btVector3 v = vec;
+    for (int i = 0; i < 3; ++i)
+    {
+        if (btFabs(v[i]) <= tol)
+            v[i] = 0;
+    }
 
-	btVector3 center = m_planeNormal*m_planeConstant;
-	aabbMin = center + infvec*m_planeNormal;
-	aabbMax = aabbMin;
-	aabbMin.setMin(center - infvec*m_planeNormal);
-	aabbMax.setMax(center - infvec*m_planeNormal); 
-	*/
-
-	aabbMin.setValue(btScalar(-BT_LARGE_FLOAT),btScalar(-BT_LARGE_FLOAT),btScalar(-BT_LARGE_FLOAT));
-	aabbMax.setValue(btScalar(BT_LARGE_FLOAT),btScalar(BT_LARGE_FLOAT),btScalar(BT_LARGE_FLOAT));
-
+    return v;
 }
 
+/// Add a point to the bounding box.
+SIMD_FORCE_INLINE void
+btAddPoint(btVector3 &aabbMin, btVector3 &aabbMax, const btVector3 &p)
+{
+    aabbMin.setMin(p);
+    aabbMax.setMax(p);
+}
+ 
+void btStaticPlaneShape::getAabb(const btTransform& t,btVector3& aabbMin,btVector3& aabbMax) const
+{
+    const btVector3 center = t * (m_planeConstant * m_planeNormal);
+    const btQuaternion r = shortestArcQuat(btVector3(0, 1, 0), t.getBasis() * m_planeNormal);
+    const btVector3 v1 = btRoundZero(quatRotate(r, btVector3(1, 0, 0))) * BT_LARGE_FLOAT;
+    const btVector3 v2 = btRoundZero(quatRotate(r, btVector3(0, 0, 1))) * BT_LARGE_FLOAT;
 
-
+    aabbMin = aabbMax = center - v1;
+    btAddPoint(aabbMin, aabbMax, center + v1);
+    btAddPoint(aabbMin, aabbMax, center - v2);
+    btAddPoint(aabbMin, aabbMax, center + v2);
+}
 
 void	btStaticPlaneShape::processAllTriangles(btTriangleCallback* callback,const btVector3& aabbMin,const btVector3& aabbMax) const
 {
