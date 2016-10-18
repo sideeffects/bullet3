@@ -22,7 +22,7 @@ Written by: Marcus Hennix
 #include "LinearMath/btMinMax.h"
 #include <new>
 
-
+#define BT_CONETWIST_FTOLERANCE 1e-6
 
 //#define CONETWIST_USE_OBSOLETE_SOLVER true
 #define CONETWIST_USE_OBSOLETE_SOLVER false
@@ -837,7 +837,7 @@ void btConeTwistConstraint::computeConeLimitInfo(const btQuaternion& qCone,
 												 btScalar& swingLimit) // out
 {
 	swingAngle = qCone.getAngle();
-	if (swingAngle > SIMD_EPSILON)
+	if (swingAngle > BT_CONETWIST_FTOLERANCE)
 	{
 		vSwingAxis = btVector3(qCone.x(), qCone.y(), qCone.z());
 		vSwingAxis.normalize();
@@ -1021,7 +1021,7 @@ void btConeTwistConstraint::setMotorTargetInConstraintSpace(const btQuaternion &
 			btScalar swingAngle, swingLimit; btVector3 swingAxis;
 			computeConeLimitInfo(qTargetCone, swingAngle, swingAxis, swingLimit);
 
-			if (fabs(swingAngle) > SIMD_EPSILON)
+			if (fabs(swingAngle) > BT_CONETWIST_FTOLERANCE)
 			{
 				if (swingAngle > swingLimit*softness)
 					swingAngle = swingLimit*softness;
@@ -1037,7 +1037,7 @@ void btConeTwistConstraint::setMotorTargetInConstraintSpace(const btQuaternion &
 			btScalar twistAngle; btVector3 twistAxis;
 			computeTwistLimitInfo(qTargetTwist, twistAngle, twistAxis);
 
-			if (fabs(twistAngle) > SIMD_EPSILON)
+			if (fabs(twistAngle) > BT_CONETWIST_FTOLERANCE)
 			{
 				// eddy todo: limitSoftness used here???
 				if (twistAngle > m_twistSpan*softness)
