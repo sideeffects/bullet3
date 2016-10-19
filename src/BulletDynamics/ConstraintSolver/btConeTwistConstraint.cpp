@@ -64,6 +64,7 @@ void btConeTwistConstraint::init()
 	m_solveTwistLimit = false;
 	m_solveSwingLimit = false;
 	m_bMotorEnabled = false;
+        m_motorActive = true;
 	m_maxMotorImpulse = btScalar(-1);
 
 	setLimit(btScalar(BT_LARGE_FLOAT), btScalar(BT_LARGE_FLOAT), btScalar(BT_LARGE_FLOAT));
@@ -219,7 +220,7 @@ void btConeTwistConstraint::getInfo2Internal (btConstraintInfo2* info,const btTr
 			}
 			// m_swingCorrection is always positive or 0
 			info->m_lowerLimit[srow] = 0;
-			info->m_upperLimit[srow] = (m_bMotorEnabled && m_maxMotorImpulse >= 0.0f) ? m_maxMotorImpulse : SIMD_INFINITY;
+			info->m_upperLimit[srow] = (m_motorActive && m_maxMotorImpulse >= 0.0f) ? m_maxMotorImpulse : SIMD_INFINITY;
 			srow += info->rowskip;
 		}
 	}
@@ -635,33 +636,7 @@ void btConeTwistConstraint::calcAngleInfo2(const btTransform& transA, const btTr
 	m_twistLimitSign = btScalar(0.);
 	m_solveTwistLimit = false;
 	m_solveSwingLimit = false;
-	// compute rotation of A wrt B (in constraint space)
-	if (m_bMotorEnabled && (!m_useSolveConstraintObsolete))
-	{	// it is assumed that setMotorTarget() was alredy called 
-		// and motor target m_qTarget is within constraint limits
-		// TODO : split rotation to pure swing and pure twist
-		// compute desired transforms in world
-		btTransform trPose(m_qTarget);
-		btTransform trA = transA * m_rbAFrame;
-		btTransform trB = transB * m_rbBFrame;
-		btTransform trDeltaAB = trB * trPose * trA.inverse();
-		btQuaternion qDeltaAB = trDeltaAB.getRotation();
-		btVector3 swingAxis = 	btVector3(qDeltaAB.x(), qDeltaAB.y(), qDeltaAB.z());
-		float swingAxisLen2 = swingAxis.length2();
-		if(btFuzzyZero(swingAxisLen2))
-		{
-		   return;
-		}
-		m_swingAxis = swingAxis;
-		m_swingAxis.normalize();
-		m_swingCorrection = qDeltaAB.getAngle();
-		if(!btFuzzyZero(m_swingCorrection))
-		{
-			m_solveSwingLimit = true;
-		}
-		return;
-	}
-
+        m_motorActive = false;
 
 	{
 		// compute rotation of A wrt B (in constraint space)
@@ -823,6 +798,33 @@ void btConeTwistConstraint::calcAngleInfo2(const btTransform& transA, const btTr
 		{
 			m_twistAngle = btScalar(0.f);
 		}
+	}
+
+	if (!m_useSolveConstraintObsolete && m_bMotorEnabled && !m_solveSwingLimit)
+	{	// it is assumed that setMotorTarget() was alredy called 
+		// and motor target m_qTarget is within constraint limits
+		// TODO : split rotation to pure swing and pure twist
+		// compute desired transforms in world
+		btTransform trPose(m_qTarget);
+		btTransform trA = transA * m_rbAFrame;
+		btTransform trB = transB * m_rbBFrame;
+		btTransform trDeltaAB = trB * trPose * trA.inverse();
+		btQuaternion qDeltaAB = trDeltaAB.getRotation();
+		btVector3 swingAxis = 	btVector3(qDeltaAB.x(), qDeltaAB.y(), qDeltaAB.z());
+		float swingAxisLen2 = swingAxis.length2();
+		if(btFuzzyZero(swingAxisLen2))
+		{
+		   return;
+		}
+		m_swingAxis = swingAxis;
+		m_swingAxis.normalize();
+		m_swingCorrection = qDeltaAB.getAngle();
+		if(!btFuzzyZero(m_swingCorrection))
+		{
+			m_solveSwingLimit = true;
+                        m_motorActive = true;
+		}
+		return;
 	}
 }
 

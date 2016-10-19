@@ -109,6 +109,7 @@ public:
 
 	// motor
 	bool		 m_bMotorEnabled;
+	bool		 m_motorActive;
 	bool		 m_bNormalizedMotorStrength;
 	btQuaternion m_qTarget;
 	btScalar	 m_maxMotorImpulse;
