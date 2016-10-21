@@ -64,7 +64,7 @@ void btConeTwistConstraint::init()
 	m_solveTwistLimit = false;
 	m_solveSwingLimit = false;
 	m_bMotorEnabled = false;
-        m_motorActive = true;
+        m_solveMotor = false;
 	m_maxMotorImpulse = btScalar(-1);
 
 	setLimit(btScalar(BT_LARGE_FLOAT), btScalar(BT_LARGE_FLOAT), btScalar(BT_LARGE_FLOAT));
@@ -100,6 +100,11 @@ void btConeTwistConstraint::getInfo1 (btConstraintInfo1* info)
 			}
 		}
 		if(m_solveTwistLimit)
+		{
+			info->m_numConstraintRows++;
+			info->nub--;
+		}
+		if(m_solveMotor)
 		{
 			info->m_numConstraintRows++;
 			info->nub--;
@@ -220,7 +225,7 @@ void btConeTwistConstraint::getInfo2Internal (btConstraintInfo2* info,const btTr
 			}
 			// m_swingCorrection is always positive or 0
 			info->m_lowerLimit[srow] = 0;
-			info->m_upperLimit[srow] = (m_motorActive && m_maxMotorImpulse >= 0.0f) ? m_maxMotorImpulse : SIMD_INFINITY;
+			info->m_upperLimit[srow] = SIMD_INFINITY;
 			srow += info->rowskip;
 		}
 	}
@@ -262,6 +267,28 @@ void btConeTwistConstraint::getInfo2Internal (btConstraintInfo2* info,const btTr
 		}
 		srow += info->rowskip;
 	}
+
+        if (m_solveMotor)
+        {
+		btScalar *J1 = info->m_J1angularAxis;
+		btScalar *J2 = info->m_J2angularAxis;
+                ax1 = m_motorAxis * m_relaxationFactor * m_relaxationFactor;
+                J1[srow+0] = ax1[0];
+                J1[srow+1] = ax1[1];
+                J1[srow+2] = ax1[2];
+                J2[srow+0] = -ax1[0];
+                J2[srow+1] = -ax1[1];
+                J2[srow+2] = -ax1[2];
+
+                // Use bias factor of 1.0
+                btScalar k = info->fps;
+                info->m_constraintError[srow] = k * m_motorCorrection;
+
+                // m_motorCorrection is always positive or 0
+                info->m_lowerLimit[srow] = 0;
+                info->m_upperLimit[srow] = m_maxMotorImpulse >= 0.0f ? m_maxMotorImpulse : SIMD_INFINITY;
+                srow += info->rowskip;
+        }
 }
 	
 
@@ -636,7 +663,7 @@ void btConeTwistConstraint::calcAngleInfo2(const btTransform& transA, const btTr
 	m_twistLimitSign = btScalar(0.);
 	m_solveTwistLimit = false;
 	m_solveSwingLimit = false;
-        m_motorActive = false;
+        m_solveMotor = false;
 
 	{
 		// compute rotation of A wrt B (in constraint space)
@@ -800,7 +827,7 @@ void btConeTwistConstraint::calcAngleInfo2(const btTransform& transA, const btTr
 		}
 	}
 
-	if (!m_useSolveConstraintObsolete && m_bMotorEnabled && !m_solveSwingLimit)
+	if (!m_useSolveConstraintObsolete && m_bMotorEnabled)
 	{	// it is assumed that setMotorTarget() was alredy called 
 		// and motor target m_qTarget is within constraint limits
 		// TODO : split rotation to pure swing and pure twist
@@ -816,13 +843,12 @@ void btConeTwistConstraint::calcAngleInfo2(const btTransform& transA, const btTr
 		{
 		   return;
 		}
-		m_swingAxis = swingAxis;
-		m_swingAxis.normalize();
-		m_swingCorrection = qDeltaAB.getAngle();
-		if(!btFuzzyZero(m_swingCorrection))
+		m_motorAxis = swingAxis;
+		m_motorAxis.normalize();
+		m_motorCorrection = qDeltaAB.getAngle();
+		if(!btFuzzyZero(m_motorCorrection))
 		{
-			m_solveSwingLimit = true;
-                        m_motorActive = true;
+                        m_solveMotor = true;
 		}
 		return;
 	}

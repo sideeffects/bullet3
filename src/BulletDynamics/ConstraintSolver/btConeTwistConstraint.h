@@ -109,11 +109,13 @@ public:
 
 	// motor
 	bool		 m_bMotorEnabled;
-	bool		 m_motorActive;
+	bool		 m_solveMotor;
 	bool		 m_bNormalizedMotorStrength;
 	btQuaternion m_qTarget;
 	btScalar	 m_maxMotorImpulse;
 	btVector3	 m_accMotorImpulse;
+	btVector3        m_motorAxis;
+	btScalar	 m_motorCorrection;
 	
 	// parameters
 	int			m_flags;
