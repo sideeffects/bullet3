@@ -286,7 +286,22 @@ void btConeTwistConstraint::getInfo2Internal (btConstraintInfo2* info,const btTr
 
                 // m_motorCorrection is always positive or 0
                 info->m_lowerLimit[srow] = 0;
-                info->m_upperLimit[srow] = m_maxMotorImpulse >= 0.0f ? m_maxMotorImpulse : SIMD_INFINITY;
+
+                if (m_maxMotorImpulse >= 0.0f)
+                {
+                    btScalar max_impulse = m_maxMotorImpulse;
+                    if (m_bNormalizedMotorStrength)
+                    {
+                        max_impulse /=
+                            (m_rbA.computeAngularImpulseDenominator(ax1) +
+                             m_rbB.computeAngularImpulseDenominator(ax1));
+                    }
+
+                    info->m_upperLimit[srow] = max_impulse;
+                }
+                else
+                    info->m_upperLimit[srow] = SIMD_INFINITY;
+
                 srow += info->rowskip;
         }
 }
@@ -1172,5 +1187,4 @@ void btConeTwistConstraint::setFrames(const btTransform & frameA, const btTransf
 }
 
  
-
 
