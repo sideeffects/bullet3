@@ -61,11 +61,13 @@ void btStaticPlaneShape::getAabb(const btTransform& t,btVector3& aabbMin,btVecto
     const btQuaternion r = shortestArcQuat(btVector3(0, 1, 0), t.getBasis() * m_planeNormal);
     const btVector3 v1 = btRoundZero(quatRotate(r, btVector3(1, 0, 0))) * BT_LARGE_FLOAT;
     const btVector3 v2 = btRoundZero(quatRotate(r, btVector3(0, 0, 1))) * BT_LARGE_FLOAT;
+    const btVector3 v3 = btRoundZero(quatRotate(r, btVector3(0, 1, 0))) * BT_LARGE_FLOAT;
 
     aabbMin = aabbMax = center - v1;
     btAddPoint(aabbMin, aabbMax, center + v1);
     btAddPoint(aabbMin, aabbMax, center - v2);
     btAddPoint(aabbMin, aabbMax, center + v2);
+    btAddPoint(aabbMin, aabbMax, center - v3);
 }
 
 void	btStaticPlaneShape::processAllTriangles(btTriangleCallback* callback,const btVector3& aabbMin,const btVector3& aabbMax) const
