@@ -822,10 +822,9 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
                     cfm = btScalar(1) / denom; 
                     erp = (infoGlobal.m_timeStep * cp.m_combinedContactStiffness1) / denom;
                 }
+
+                cfm *= invTimeStep;
             }
-            
-            cfm *= invTimeStep;
-            
 
 			btVector3 torqueAxis0 = rel_pos1.cross(cp.m_normalWorldOnB);
 			solverConstraint.m_angularComponentA = rb0 ? rb0->getInvInertiaTensorWorld()*torqueAxis0*rb0->getAngularFactor() : btVector3(0,0,0);
