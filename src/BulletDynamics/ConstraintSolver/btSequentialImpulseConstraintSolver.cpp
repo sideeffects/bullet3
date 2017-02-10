@@ -798,6 +798,12 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
             btScalar cfm = infoGlobal.m_globalCfm;
             btScalar erp = infoGlobal.m_erp2;
 
+            btScalar penetration = cp.getDistance()+infoGlobal.m_linearSlop;
+            if (!infoGlobal.m_splitImpulse || (penetration > infoGlobal.m_splitImpulsePenetrationThreshold))
+            {
+                erp = infoGlobal.m_erp;
+            }
+
             if ((cp.m_contactPointFlags&BT_CONTACT_FLAG_HAS_CONTACT_CFM) || (cp.m_contactPointFlags&BT_CONTACT_FLAG_HAS_CONTACT_ERP))
             {
                 if (cp.m_contactPointFlags&BT_CONTACT_FLAG_HAS_CONTACT_CFM)
@@ -870,7 +876,6 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
 				}
 
 				btScalar restitution = 0.f;
-				btScalar penetration = cp.getDistance()+infoGlobal.m_linearSlop;
 
 				{
 					btVector3 vel1,vel2;
@@ -928,7 +933,6 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
 					btScalar	velocityError = restitution - rel_vel;// * damping;
 
 
-				
 					if (penetration>0)
 					{
 						positionalError = 0;
