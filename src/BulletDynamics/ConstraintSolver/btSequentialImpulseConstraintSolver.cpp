@@ -1273,9 +1273,6 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlySetup(btCol
 	{
 		bodies[i]->setCompanionId(-1);
 	}
-#if BT_THREADSAFE
-    m_kinematicBodyUniqueIdToSolverBodyTable.resize( 0 );
-#endif // BT_THREADSAFE
 
 	m_tmpSolverBodyPool.reserve(numBodies+1);
 	m_tmpSolverBodyPool.resize(0);
