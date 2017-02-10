@@ -4,7 +4,7 @@
 
 #pragma once
 
-typedef void (*SliderParamChangedCallback) (float newVal);
+typedef void (*SliderParamChangedCallback) (float newVal, void* userPointer);
 #include "LinearMath/btScalar.h"
 
 struct SliderParams
@@ -16,6 +16,7 @@ struct SliderParams
 	btScalar* m_paramValuePointer;
 	void* m_userPointer;
 	bool m_clampToNotches;
+    bool m_clampToIntegers;
     bool m_showValues;
     
 	SliderParams(const char* name, btScalar* targetValuePointer)
@@ -26,6 +27,7 @@ struct SliderParams
 	m_paramValuePointer(targetValuePointer),
 	m_userPointer(0),
 	m_clampToNotches(true),
+    m_clampToIntegers(false),
     m_showValues(true)
 	{
 	}
@@ -40,12 +42,14 @@ struct ButtonParams
 	const char* m_name;
 	int m_buttonId;
 	void* m_userPointer;
+    bool m_isTrigger;
 
 	ButtonParamChangedCallback m_callback;
 	ButtonParams(const char* name, int buttonId, bool isTrigger)
 		:m_name(name),
 		m_buttonId(buttonId),
 		m_userPointer(0),
+    m_isTrigger(isTrigger),
 	m_callback(0)
 	{
 	}

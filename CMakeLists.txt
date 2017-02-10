@@ -5,10 +5,14 @@ set(CMAKE_ALLOW_LOOSE_LOOP_CONSTRUCTS true)
 SET(MSVC_INCREMENTAL_DEFAULT ON)
 
 PROJECT(BULLET_PHYSICS)
-SET(BULLET_VERSION 2.83)
+SET(BULLET_VERSION 2.85)
 
 IF(COMMAND cmake_policy)
    cmake_policy(SET CMP0003 NEW)
+   if(POLICY CMP0042)
+      # Enable MACOSX_RPATH by default.
+      cmake_policy(SET CMP0042 NEW)
+   endif(POLICY CMP0042)
 ENDIF(COMMAND cmake_policy)
 
 
@@ -26,6 +30,8 @@ ENDIF ()
 OPTION(USE_DOUBLE_PRECISION "Use double precision"	OFF)
 OPTION(USE_GRAPHICAL_BENCHMARK "Use Graphical Benchmark" ON)
 OPTION(BUILD_SHARED_LIBS "Use shared libraries" OFF)
+OPTION(USE_SOFT_BODY_MULTI_BODY_DYNAMICS_WORLD "Use btSoftMultiBodyDynamicsWorld" OFF)	
+OPTION(BULLET2_USE_THREAD_LOCKS "Build Bullet 2 libraries with mutex locking around certain operations" OFF)
 
 OPTION(USE_MSVC_INCREMENTAL_LINKING "Use MSVC Incremental Linking" OFF)
 OPTION(USE_CUSTOM_VECTOR_MATH "Use custom vectormath library" OFF)
@@ -91,6 +97,8 @@ IF(MSVC)
 	IF (USE_MSVC_FAST_FLOATINGPOINT)
 		  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
   ENDIF()
+
+	SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4267")
 ENDIF(MSVC)
 
 
@@ -144,9 +152,20 @@ ADD_DEFINITIONS( -DBT_USE_DOUBLE_PRECISION)
 SET( BULLET_DOUBLE_DEF "-DBT_USE_DOUBLE_PRECISION")
 ENDIF (USE_DOUBLE_PRECISION)
 
+IF (USE_SOFT_BODY_MULTI_BODY_DYNAMICS_WORLD)
+ADD_DEFINITIONS(-DUSE_SOFT_BODY_MULTI_BODY_DYNAMICS_WORLD)
+ENDIF (USE_SOFT_BODY_MULTI_BODY_DYNAMICS_WORLD)
+
 IF(USE_GRAPHICAL_BENCHMARK)
 ADD_DEFINITIONS( -DUSE_GRAPHICAL_BENCHMARK)
 ENDIF (USE_GRAPHICAL_BENCHMARK)
+
+IF(BULLET2_USE_THREAD_LOCKS)
+	ADD_DEFINITIONS( -DBT_THREADSAFE=1 )
+	IF (NOT MSVC)
+		SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+	ENDIF (NOT MSVC)
+ENDIF (BULLET2_USE_THREAD_LOCKS)
 
 IF (WIN32)
 OPTION(USE_GLUT "Use Glut"	ON)
@@ -189,13 +208,41 @@ ENDIF (OPENGL_FOUND)
 #FIND_PACKAGE(GLU)
 
 
-
-
 IF (APPLE)
   FIND_LIBRARY(COCOA_LIBRARY Cocoa)
 ENDIF()
 
 OPTION(BUILD_BULLET3 "Set when you want to build Bullet 3" ON)
+
+OPTION(BUILD_PYBULLET "Set when you want to build pybullet (experimental Python bindings for Bullet)" OFF)
+
+
+IF(BUILD_PYBULLET)
+
+	FIND_PACKAGE(PythonLibs)
+
+	OPTION(BUILD_PYBULLET_NUMPY "Set when you want to build pybullet with NumPy support" OFF)
+	OPTION(BUILD_PYBULLET_ENET "Set when you want to build pybullet with enet UDP networking support" ON)
+	
+	IF(BUILD_PYBULLET_NUMPY)	
+		set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_LIST_DIR}/build3/cmake)
+		#include(FindNumPy)
+		FIND_PACKAGE(NumPy)
+		if (PYTHON_NUMPY_FOUND)
+			message("NumPy found")
+			add_definitions(-DPYBULLET_USE_NUMPY)
+		else()
+			message("NumPy not found")
+		endif()
+	ENDIF()
+	OPTION(BUILD_PYBULLET "Set when you want to build pybullet (experimental Python bindings for Bullet)" OFF)
+
+	IF(WIN32)
+		SET(BUILD_SHARED_LIBS OFF CACHE BOOL "Shared Libs" FORCE)
+	ELSE(WIN32)
+		SET(BUILD_SHARED_LIBS ON CACHE BOOL "Shared Libs" FORCE)
+	ENDIF(WIN32)
+ENDIF(BUILD_PYBULLET)
 
 IF(BUILD_BULLET3)
 	 IF(APPLE)
@@ -229,6 +276,15 @@ IF(BUILD_BULLET2_DEMOS)
 	IF(EXISTS ${BULLET_PHYSICS_SOURCE_DIR}/examples AND IS_DIRECTORY ${BULLET_PHYSICS_SOURCE_DIR}/examples)
 		SUBDIRS(examples)
 	ENDIF()
+
+        IF (BULLET2_USE_THREAD_LOCKS)
+            OPTION(BULLET2_MULTITHREADED_OPEN_MP_DEMO "Build Bullet 2 MultithreadedDemo using OpenMP (requires a compiler with OpenMP support)" OFF)
+            OPTION(BULLET2_MULTITHREADED_TBB_DEMO "Build Bullet 2 MultithreadedDemo using Intel Threading Building Blocks (requires the TBB library to be already installed)" OFF)
+            IF (MSVC)
+                OPTION(BULLET2_MULTITHREADED_PPL_DEMO "Build Bullet 2 MultithreadedDemo using Microsoft Parallel Patterns Library (requires MSVC compiler)" OFF)
+            ENDIF (MSVC)
+        ENDIF (BULLET2_USE_THREAD_LOCKS)
+
 ENDIF(BUILD_BULLET2_DEMOS)
 
 

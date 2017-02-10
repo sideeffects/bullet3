@@ -16,7 +16,7 @@ subject to the following restrictions:
 ///Specialized capsule-capsule collision algorithm has been added for Bullet 2.75 release to increase ragdoll performance
 ///If you experience problems with capsule-capsule collision, try to define BT_DISABLE_CAPSULE_CAPSULE_COLLIDER and report it in the Bullet forums
 ///with reproduction case
-//define BT_DISABLE_CAPSULE_CAPSULE_COLLIDER 1
+//#define BT_DISABLE_CAPSULE_CAPSULE_COLLIDER 1
 //#define ZERO_MARGIN
 
 #include "btConvexConvexAlgorithm.h"
@@ -179,7 +179,7 @@ static SIMD_FORCE_INLINE btScalar capsuleCapsuleDistance(
 
 
 
-btConvexConvexAlgorithm::CreateFunc::CreateFunc(btSimplexSolverInterface*			simplexSolver, btConvexPenetrationDepthSolver* pdSolver)
+btConvexConvexAlgorithm::CreateFunc::CreateFunc(btConvexPenetrationDepthSolver* pdSolver)
 {
 	m_numPerturbationIterations = 0;
 	m_minimumPointsPerturbationThreshold = 3;
@@ -190,7 +190,7 @@ btConvexConvexAlgorithm::CreateFunc::~CreateFunc()
 { 
 }
 
-btConvexConvexAlgorithm::btConvexConvexAlgorithm(btPersistentManifold* mf,const btCollisionAlgorithmConstructionInfo& ci,const btCollisionObjectWrapper* body0Wrap,const btCollisionObjectWrapper* body1Wrap,btSimplexSolverInterface* simplexSolver, btConvexPenetrationDepthSolver* pdSolver,int numPerturbationIterations, int minimumPointsPerturbationThreshold)
+btConvexConvexAlgorithm::btConvexConvexAlgorithm(btPersistentManifold* mf,const btCollisionAlgorithmConstructionInfo& ci,const btCollisionObjectWrapper* body0Wrap,const btCollisionObjectWrapper* body1Wrap,btConvexPenetrationDepthSolver* pdSolver,int numPerturbationIterations, int minimumPointsPerturbationThreshold)
 : btActivatingCollisionAlgorithm(ci,body0Wrap,body1Wrap),
 m_pdSolver(pdSolver),
 m_ownManifold (false),
@@ -310,15 +310,59 @@ void btConvexConvexAlgorithm ::processCollision (const btCollisionObjectWrapper*
 #ifndef BT_DISABLE_CAPSULE_CAPSULE_COLLIDER
 	if ((min0->getShapeType() == CAPSULE_SHAPE_PROXYTYPE) && (min1->getShapeType() == CAPSULE_SHAPE_PROXYTYPE))
 	{
+		//m_manifoldPtr->clearManifold();
+
 		btCapsuleShape* capsuleA = (btCapsuleShape*) min0;
 		btCapsuleShape* capsuleB = (btCapsuleShape*) min1;
-	//	btVector3 localScalingA = capsuleA->getLocalScaling();
-	//	btVector3 localScalingB = capsuleB->getLocalScaling();
 		
 		btScalar threshold = m_manifoldPtr->getContactBreakingThreshold();
 
 		btScalar dist = capsuleCapsuleDistance(normalOnB,	pointOnBWorld,capsuleA->getHalfHeight(),capsuleA->getRadius(),
 			capsuleB->getHalfHeight(),capsuleB->getRadius(),capsuleA->getUpAxis(),capsuleB->getUpAxis(),
+			body0Wrap->getWorldTransform(),body1Wrap->getWorldTransform(),threshold);
+
+		if (dist<threshold)
+		{
+			btAssert(normalOnB.length2()>=(SIMD_EPSILON*SIMD_EPSILON));
+			resultOut->addContactPoint(normalOnB,pointOnBWorld,dist);	
+		}
+		resultOut->refreshContactPoints();
+		return;
+	}
+
+	if ((min0->getShapeType() == CAPSULE_SHAPE_PROXYTYPE) && (min1->getShapeType() == SPHERE_SHAPE_PROXYTYPE))
+	{
+		//m_manifoldPtr->clearManifold();
+
+		btCapsuleShape* capsuleA = (btCapsuleShape*) min0;
+		btSphereShape* capsuleB = (btSphereShape*) min1;
+		
+		btScalar threshold = m_manifoldPtr->getContactBreakingThreshold();
+
+		btScalar dist = capsuleCapsuleDistance(normalOnB,	pointOnBWorld,capsuleA->getHalfHeight(),capsuleA->getRadius(),
+			0.,capsuleB->getRadius(),capsuleA->getUpAxis(),1,
+			body0Wrap->getWorldTransform(),body1Wrap->getWorldTransform(),threshold);
+
+		if (dist<threshold)
+		{
+			btAssert(normalOnB.length2()>=(SIMD_EPSILON*SIMD_EPSILON));
+			resultOut->addContactPoint(normalOnB,pointOnBWorld,dist);	
+		}
+		resultOut->refreshContactPoints();
+		return;
+	}
+
+	if ((min0->getShapeType() == SPHERE_SHAPE_PROXYTYPE) && (min1->getShapeType() == CAPSULE_SHAPE_PROXYTYPE))
+	{
+		//m_manifoldPtr->clearManifold();
+
+		btSphereShape* capsuleA = (btSphereShape*) min0;
+		btCapsuleShape* capsuleB = (btCapsuleShape*) min1;
+		
+		btScalar threshold = m_manifoldPtr->getContactBreakingThreshold();
+
+		btScalar dist = capsuleCapsuleDistance(normalOnB,	pointOnBWorld,0.,capsuleA->getRadius(),
+			capsuleB->getHalfHeight(),capsuleB->getRadius(),1,capsuleB->getUpAxis(),
 			body0Wrap->getWorldTransform(),body1Wrap->getWorldTransform(),threshold);
 
 		if (dist<threshold)
@@ -369,7 +413,7 @@ void btConvexConvexAlgorithm ::processCollision (const btCollisionObjectWrapper*
 		//	input.m_maximumDistanceSquared = min0->getMargin() + min1->getMargin() + m_manifoldPtr->getContactProcessingThreshold();
 		//} else
 		//{
-		input.m_maximumDistanceSquared = min0->getMargin() + min1->getMargin() + m_manifoldPtr->getContactBreakingThreshold();
+		input.m_maximumDistanceSquared = min0->getMargin() + min1->getMargin() + m_manifoldPtr->getContactBreakingThreshold()+resultOut->m_closestPointDistanceThreshold;
 //		}
 
 		input.m_maximumDistanceSquared*= input.m_maximumDistanceSquared;
@@ -505,9 +549,11 @@ void btConvexConvexAlgorithm ::processCollision (const btCollisionObjectWrapper*
 				
 //				printf("sepNormalWorldSpace=%f,%f,%f\n",sepNormalWorldSpace.getX(),sepNormalWorldSpace.getY(),sepNormalWorldSpace.getZ());
 
+				worldVertsB1.resize(0);
 				btPolyhedralContactClipping::clipHullAgainstHull(sepNormalWorldSpace, *polyhedronA->getConvexPolyhedron(), *polyhedronB->getConvexPolyhedron(),
 					body0Wrap->getWorldTransform(), 
-					body1Wrap->getWorldTransform(), minDist-threshold, threshold, *resultOut);
+																 body1Wrap->getWorldTransform(), minDist-threshold, threshold, worldVertsB1,worldVertsB2,
+																 *resultOut);
  				
 			}
 			if (m_ownManifold)
@@ -570,8 +616,9 @@ void btConvexConvexAlgorithm ::processCollision (const btCollisionObjectWrapper*
 				
 			if (foundSepAxis)
 			{
+				worldVertsB2.resize(0);
 				btPolyhedralContactClipping::clipFaceAgainstHull(sepNormalWorldSpace, *polyhedronA->getConvexPolyhedron(), 
-					body0Wrap->getWorldTransform(), vertices, minDist-threshold, maxDist, *resultOut);
+					body0Wrap->getWorldTransform(), vertices, worldVertsB2,minDist-threshold, maxDist, *resultOut);
 			}
 				
 				

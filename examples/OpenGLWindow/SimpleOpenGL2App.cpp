@@ -70,6 +70,11 @@ struct SimpleOpenGL2AppInternalData
 {
 	GLuint m_fontTextureId;
 	GLuint m_largeFontTextureId;
+	int m_upAxis;
+	SimpleOpenGL2AppInternalData()
+		:m_upAxis(1)
+	{
+	}
 	
 };
 static GLuint BindFont2(const CTexFont *_Font)
@@ -268,10 +273,11 @@ void SimpleOpenGL2App::drawGrid(DrawGridData data)
 }
 void SimpleOpenGL2App::setUpAxis(int axis)
 {
+	this->m_data->m_upAxis = axis;
 }
 int SimpleOpenGL2App::getUpAxis() const
 {
-	return 1;
+	return this->m_data->m_upAxis;
 }
 	
 void SimpleOpenGL2App::swapBuffer()
@@ -280,7 +286,7 @@ void SimpleOpenGL2App::swapBuffer()
 	m_window->startRendering();
 
 }
-void SimpleOpenGL2App::drawText( const char* txt, int posX, int posY)
+void SimpleOpenGL2App::drawText( const char* txt, int posX, int posY, float size)
 {
 
 }
@@ -414,10 +420,10 @@ void SimpleOpenGL2App::drawText3D( const char* txt, float worldPosX, float world
 						0,0,0,1};
 */
 			   PrimVertex vertexData[4] = {
-					{ PrimVec4(-1.f+2.f*x0/float(screenWidth), 1.f-2.f*y0/float(screenHeight), z, 1.f ), PrimVec4( color[0], color[1], color[2], color[3] ) ,PrimVec2(u0,v0)},
-					{ PrimVec4(-1.f+2.f*x0/float(screenWidth),  1.f-2.f*y1/float(screenHeight), z, 1.f ), PrimVec4( color[0], color[1], color[2], color[3] ) ,PrimVec2(u0,v1)},
-					{ PrimVec4( -1.f+2.f*x1/float(screenWidth),  1.f-2.f*y1/float(screenHeight), z, 1.f ), PrimVec4(color[0], color[1], color[2], color[3]) ,PrimVec2(u1,v1)},
-					{ PrimVec4( -1.f+2.f*x1/float(screenWidth), 1.f-2.f*y0/float(screenHeight), z, 1.f ), PrimVec4( color[0], color[1], color[2], color[3] ) ,PrimVec2(u1,v0)}
+					PrimVertex( PrimVec4(-1.f+2.f*x0/float(screenWidth), 1.f-2.f*y0/float(screenHeight), z, 1.f ), PrimVec4( color[0], color[1], color[2], color[3] ) ,PrimVec2(u0,v0)),
+					PrimVertex( PrimVec4(-1.f+2.f*x0/float(screenWidth),  1.f-2.f*y1/float(screenHeight), z, 1.f ), PrimVec4( color[0], color[1], color[2], color[3] ) ,PrimVec2(u0,v1)),
+					PrimVertex(PrimVec4( -1.f+2.f*x1/float(screenWidth),  1.f-2.f*y1/float(screenHeight), z, 1.f ), PrimVec4(color[0], color[1], color[2], color[3]) ,PrimVec2(u1,v1)),
+					PrimVertex( PrimVec4( -1.f+2.f*x1/float(screenWidth), 1.f-2.f*y0/float(screenHeight), z, 1.f ), PrimVec4( color[0], color[1], color[2], color[3] ) ,PrimVec2(u1,v0))
 				};
     
 				glBegin(GL_TRIANGLES);

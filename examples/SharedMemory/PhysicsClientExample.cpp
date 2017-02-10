@@ -2,23 +2,34 @@
 #include "PhysicsClientExample.h"
 
 #include "../CommonInterfaces/CommonMultiBodyBase.h"
-
+#include "../CommonInterfaces/Common2dCanvasInterface.h"
 #include "SharedMemoryCommon.h"
 #include "../CommonInterfaces/CommonParameterInterface.h"
+
 #include "PhysicsClientC_API.h"
 #include "PhysicsClient.h"
 //#include "SharedMemoryCommands.h"
 #include "PhysicsLoopBackC_API.h"
 #include "PhysicsDirectC_API.h"
 #include "PhysicsClientC_API.h"
-
+#include "PhysicsServerSharedMemory.h"
 struct MyMotorInfo2
 {
 	btScalar m_velTarget;
 	btScalar m_maxForce;
+    btScalar m_posTarget;
 	int		m_uIndex;
+    int     m_qIndex;
 };
 
+int camVisualizerWidth = 320;//1024/3;
+int camVisualizerHeight = 240;//768/3;
+
+enum CustomCommands
+{
+	CMD_CUSTOM_SET_REALTIME_SIMULATION = CMD_MAX_CLIENT_COMMANDS+1,
+	CMD_CUSTOM_SET_GRAVITY
+};
 
 #define MAX_NUM_MOTORS 128
 
@@ -26,24 +37,39 @@ class PhysicsClientExample : public SharedMemoryCommon
 {
 protected:
     b3PhysicsClientHandle m_physicsClientHandle;
+
+	//this m_physicsServer is only used when option eCLIENTEXAMPLE_SERVER is enabled
+	PhysicsServerSharedMemory	m_physicsServer;
 	
 	bool m_wantsTermination;
     btAlignedObjectArray<int> m_userCommandRequests;
+    btAlignedObjectArray<int> m_bodyUniqueIds;
+    
+    
     int m_sharedMemoryKey;
     int m_selectedBody;
 	int m_prevSelectedBody;
+	struct Common2dCanvasInterface* m_canvas;
+	int m_canvasRGBIndex;
+	int m_canvasDepthIndex;
+	int m_canvasSegMaskIndex;
+	
 	void	createButton(const char* name, int id, bool isTrigger );
 
 	void createButtons();
 	
-public:
-    
-    //@todo, add accessor methods
-	MyMotorInfo2 m_motorTargetVelocities[MAX_NUM_MOTORS];
-	int m_numMotors;
 
     
-	PhysicsClientExample(GUIHelperInterface* helper);
+    //@todo, add accessor methods
+	// MyMotorInfo2 m_motorTargetVelocities[MAX_NUM_MOTORS];
+    MyMotorInfo2 m_motorTargetPositions[MAX_NUM_MOTORS];
+	int m_numMotors;
+	int m_options;
+	bool m_isOptionalServerConnected;
+
+	public:
+
+	PhysicsClientExample(GUIHelperInterface* helper, int options);
 	virtual ~PhysicsClientExample();
     
 	virtual void	initPhysics();
@@ -51,7 +77,8 @@ public:
 	{
 		if (m_guiHelper && m_guiHelper->getParameterInterface())
 		{
-			int bodyIndex = comboIndex;
+            int itemIndex = int(atoi(name));
+			int bodyIndex = m_bodyUniqueIds[itemIndex];
 			if (m_selectedBody != bodyIndex)
 			{
 				m_selectedBody = bodyIndex;
@@ -62,10 +89,10 @@ public:
     
 	virtual void resetCamera()
 	{
-		float dist = 5;
-		float pitch = 50;
-		float yaw = 35;
-		float targetPos[3]={0,0,0};//-3,2.8,-2.5};
+        float dist = 4;
+        float pitch = 193;
+        float yaw = 25;
+        float targetPos[3]={0,0,0.5};//-3,2.8,-2.5};
 		m_guiHelper->resetCamera(dist,pitch,yaw,targetPos[0],targetPos[1],targetPos[2]);
 
 	}
@@ -90,6 +117,11 @@ public:
 	virtual void    exitPhysics(){};
 	virtual void	renderScene()
 	{
+		if (m_options == eCLIENTEXAMPLE_SERVER)
+		{
+			m_physicsServer.renderScene();
+		}
+
         b3DebugLines debugLines;
         b3GetDebugLines(m_physicsClientHandle,&debugLines);
         int numLines = debugLines.m_numDebugLines;
@@ -134,16 +166,32 @@ public:
 
 	void prepareControlCommand(b3SharedMemoryCommandHandle commandHandle)
 	{
+        
         for (int i=0;i<m_numMotors;i++)
         {
-            btScalar targetVel = m_motorTargetVelocities[i].m_velTarget;
-                
-            int uIndex = m_motorTargetVelocities[i].m_uIndex;
-            b3JointControlSetDesiredVelocity(commandHandle, uIndex,targetVel);
-            b3JointControlSetMaximumForce(commandHandle,uIndex,1000);
+            
+            btScalar targetPos = m_motorTargetPositions[i].m_posTarget;
+            int qIndex = m_motorTargetPositions[i].m_qIndex;
+            int uIndex = m_motorTargetPositions[i].m_uIndex;
+            static int serial=0;
+            serial++;
+          //  b3Printf("# motors = %d, cmd[%d] qIndex = %d, uIndex = %d, targetPos = %f", m_numMotors, serial, qIndex,uIndex,targetPos);
+            
+            b3JointControlSetDesiredPosition(commandHandle, qIndex, targetPos);
+            b3JointControlSetDesiredVelocity(commandHandle,uIndex,0);
+            b3JointControlSetKp(commandHandle, qIndex, 0.2);
+            b3JointControlSetKd(commandHandle, uIndex, 1.);
+            
+            b3JointControlSetMaximumForce(commandHandle,uIndex,5000);
         }
 	}
-	virtual void	physicsDebugDraw(int debugFlags){}
+	virtual void	physicsDebugDraw(int debugFlags)
+	{
+		if (m_options==eCLIENTEXAMPLE_SERVER)
+		{
+			m_physicsServer.physicsDebugDraw(debugFlags);
+		}
+	}
 	virtual bool	mouseMoveCallback(float x,float y){return false;};
 	virtual bool	mouseButtonCallback(int button, int state, float x, float y){return false;}
 	virtual bool	keyboardCallback(int key, int state){return false;}
@@ -158,7 +206,7 @@ public:
 
 void MyComboBoxCallback (int combobox, const char* item, void* userPointer)
 {
-	b3Printf("Item selected %s", item);
+	//b3Printf("Item selected %s", item);
 
 	PhysicsClientExample* cl = (PhysicsClientExample*) userPointer;
 	b3Assert(cl);
@@ -194,9 +242,7 @@ void PhysicsClientExample::prepareAndSubmitCommand(int commandId)
     {
         case  CMD_LOAD_URDF:
         {
-            
-            b3SharedMemoryCommandHandle commandHandle = b3LoadUrdfCommandInit(m_physicsClientHandle, "kuka_lwr/kuka.urdf");
-            
+            b3SharedMemoryCommandHandle commandHandle = b3LoadUrdfCommandInit(m_physicsClientHandle, "kuka_iiwa/model.urdf");
             //setting the initial position, orientation and other arguments are optional
             double startPosX = 0;
             static double startPosY = 0;
@@ -205,13 +251,36 @@ void PhysicsClientExample::prepareAndSubmitCommand(int commandId)
 			startPosY += 2.f;
 //            ret = b3LoadUrdfCommandSetUseFixedBase(commandHandle, 1);
             b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
-
             break;
+        }
+        
+        case  CMD_LOAD_SDF:
+        {
+            b3SharedMemoryCommandHandle commandHandle = b3LoadSdfCommandInit(m_physicsClientHandle, "two_cubes.sdf");//kuka_iiwa/model.sdf");
+            b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+            break;
+        }
+        case CMD_REQUEST_CAMERA_IMAGE_DATA:
+        {
+            ///request an image from a simulated camera, using a software renderer.
+            
+            b3SharedMemoryCommandHandle commandHandle = b3InitRequestCameraImage(m_physicsClientHandle);
+            //b3RequestCameraImageSelectRenderer(commandHandle,ER_BULLET_HARDWARE_OPENGL);
+            
+						float viewMatrix[16];
+						float projectionMatrix[16];
+						m_guiHelper->getRenderInterface()->getActiveCamera()->getCameraProjectionMatrix(projectionMatrix);
+            m_guiHelper->getRenderInterface()->getActiveCamera()->getCameraViewMatrix(viewMatrix);
+            
+            b3RequestCameraImageSetCameraMatrices(commandHandle, viewMatrix,projectionMatrix);
+						b3RequestCameraImageSetPixelResolution(commandHandle, camVisualizerWidth,camVisualizerHeight);
+						b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+		        break;
         }
         case CMD_CREATE_BOX_COLLISION_SHAPE:
         {
             b3SharedMemoryCommandHandle commandHandle = b3CreateBoxShapeCommandInit(m_physicsClientHandle);
-            b3CreateBoxCommandSetStartPosition(commandHandle,0,0,-3);
+            b3CreateBoxCommandSetStartPosition(commandHandle,0,0,-1.5);
 			b3CreateBoxCommandSetColorRGBA(commandHandle,0,0,1,1);
             b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
             break;
@@ -235,7 +304,15 @@ void PhysicsClientExample::prepareAndSubmitCommand(int commandId)
 			if (m_selectedBody>=0)
 			{
 				b3SharedMemoryCommandHandle commandHandle = b3RequestActualStateCommandInit(m_physicsClientHandle,m_selectedBody);
+                b3SharedMemoryStatusHandle statusHandle = b3SubmitClientCommandAndWaitStatus(m_physicsClientHandle, commandHandle);
 				b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+                
+                int numJoints = b3GetNumJoints(m_physicsClientHandle, m_selectedBody);
+                for (int i = 0; i < numJoints; ++i) {
+                    struct b3JointSensorState sensorState;
+                    b3GetJointState(m_physicsClientHandle, statusHandle, i, &sensorState);
+                    //b3Printf("Joint %d: %f", i, sensorState.m_jointMotorTorque);
+                }
 			}
             break;
         };
@@ -308,10 +385,18 @@ void PhysicsClientExample::prepareAndSubmitCommand(int commandId)
         }
         case CMD_SEND_DESIRED_STATE:
         {
-            b3SharedMemoryCommandHandle command = b3JointControlCommandInit( m_physicsClientHandle, CONTROL_MODE_VELOCITY);
+	   if (m_selectedBody>=0)
+           {
+            // b3SharedMemoryCommandHandle command = b3JointControlCommandInit( m_physicsClientHandle, m_selectedBody, CONTROL_MODE_VELOCITY);
+            b3SharedMemoryCommandHandle command = b3JointControlCommandInit2( m_physicsClientHandle, m_selectedBody, CONTROL_MODE_POSITION_VELOCITY_PD);
+          //  b3Printf("prepare control command for body %d", m_selectedBody);
+               
             prepareControlCommand(command);
+            
+               
             b3SubmitClientCommand(m_physicsClientHandle, command);
-            break;
+        }   
+	 break;
         }
         case CMD_RESET_SIMULATION:
         {
@@ -330,6 +415,88 @@ void PhysicsClientExample::prepareAndSubmitCommand(int commandId)
 
             break;
         }
+        case CMD_CUSTOM_SET_GRAVITY: {
+            b3SharedMemoryCommandHandle commandHandle = b3InitPhysicsParamCommand(m_physicsClientHandle);
+            b3PhysicsParamSetGravity(commandHandle, 0.0, 0.0, -9.8);
+            b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+            break;
+        }
+
+		case CMD_CUSTOM_SET_REALTIME_SIMULATION:
+		{
+			b3SharedMemoryCommandHandle commandHandle = b3InitPhysicsParamCommand(m_physicsClientHandle);
+            b3PhysicsParamSetRealTimeSimulation(commandHandle,1);
+            b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+            break;
+		}
+        
+		case CMD_CALCULATE_INVERSE_DYNAMICS:
+		{
+			if (m_selectedBody >= 0)
+			{
+				btAlignedObjectArray<double> jointPositionsQ;
+				btAlignedObjectArray<double> jointVelocitiesQdot;
+				btAlignedObjectArray<double> jointAccelerations;
+				int numJoints = b3GetNumJoints(m_physicsClientHandle, m_selectedBody);
+				if (numJoints)
+				{
+					b3Printf("Compute inverse dynamics for joint accelerations:");
+					jointPositionsQ.resize(numJoints);
+					jointVelocitiesQdot.resize(numJoints);
+					jointAccelerations.resize(numJoints);
+					for (int i = 0; i < numJoints; i++)
+					{
+						jointAccelerations[i] = 100;
+						b3Printf("Desired joint acceleration[%d]=%f", i, jointAccelerations[i]);
+					}
+					b3SharedMemoryCommandHandle commandHandle = b3CalculateInverseDynamicsCommandInit(m_physicsClientHandle,
+						m_selectedBody, &jointPositionsQ[0], &jointVelocitiesQdot[0], &jointAccelerations[0]);
+					b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+
+				}
+			}
+			break;
+		}
+		case CMD_REQUEST_CONTACT_POINT_INFORMATION:
+            {
+                b3SharedMemoryCommandHandle commandHandle = b3InitRequestContactPointInformation(m_physicsClientHandle);
+				b3SetContactFilterBodyA(commandHandle,0);
+				b3SetContactFilterBodyB(commandHandle,1);
+                b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+                break;
+            }
+		case CMD_SAVE_WORLD:
+		{
+                b3SharedMemoryCommandHandle commandHandle = b3SaveWorldCommandInit(m_physicsClientHandle, "saveWorld.py");
+                b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+			break;
+		}
+		case CMD_REQUEST_VISUAL_SHAPE_INFO:
+		{
+			if (m_selectedBody >= 0)
+			{
+				//request visual shape information
+				b3SharedMemoryCommandHandle commandHandle = b3InitRequestVisualShapeInformation(m_physicsClientHandle, m_selectedBody);
+				b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+			}
+			break;
+		}
+        case CMD_SET_SHADOW:
+        {
+            b3SharedMemoryCommandHandle commandHandle = b3InitRequestCameraImage(m_physicsClientHandle);
+            float viewMatrix[16];
+            float projectionMatrix[16];
+            m_guiHelper->getRenderInterface()->getActiveCamera()->getCameraProjectionMatrix(projectionMatrix);
+            m_guiHelper->getRenderInterface()->getActiveCamera()->getCameraViewMatrix(viewMatrix);
+            
+            b3RequestCameraImageSetCameraMatrices(commandHandle, viewMatrix,projectionMatrix);
+            b3RequestCameraImageSetPixelResolution(commandHandle, camVisualizerWidth,camVisualizerHeight);
+            bool hasShadow = true;
+            b3RequestCameraImageSetShadow(commandHandle, hasShadow);
+            b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+            break;
+        }
+
         default:
         {
             b3Error("Unknown buttonId");
@@ -340,14 +507,21 @@ void PhysicsClientExample::prepareAndSubmitCommand(int commandId)
 
 
 
-PhysicsClientExample::PhysicsClientExample(GUIHelperInterface* helper)
+PhysicsClientExample::PhysicsClientExample(GUIHelperInterface* helper, int options)
 :SharedMemoryCommon(helper),
 m_physicsClientHandle(0),
 m_wantsTermination(false),
 m_sharedMemoryKey(SHARED_MEMORY_KEY),
 m_selectedBody(-1),
 m_prevSelectedBody(-1),
-m_numMotors(0)
+m_canvas(0),
+m_canvasRGBIndex(-1),
+m_canvasDepthIndex(-1),
+m_canvasSegMaskIndex(-1),
+m_numMotors(0),
+m_options(options),
+m_isOptionalServerConnected(false)
+	
 {
 	b3Printf("Started PhysicsClientExample\n");
 }
@@ -358,6 +532,23 @@ PhysicsClientExample::~PhysicsClientExample()
 	{
 		b3ProcessServerStatus(m_physicsClientHandle);
 		b3DisconnectSharedMemory(m_physicsClientHandle);
+	}
+
+	if (m_options == eCLIENTEXAMPLE_SERVER)
+	{
+		bool deInitializeSharedMemory = true;
+		m_physicsServer.disconnectSharedMemory(deInitializeSharedMemory);
+	}
+	
+	if (m_canvas)
+	{
+	    if (m_canvasRGBIndex>=0)
+            m_canvas->destroyCanvas(m_canvasRGBIndex);
+	    if (m_canvasDepthIndex>=0)
+            m_canvas->destroyCanvas(m_canvasDepthIndex);
+        if (m_canvasSegMaskIndex>=0)
+            m_canvas->destroyCanvas(m_canvasSegMaskIndex);
+		
 	}
     b3Printf("~PhysicsClientExample\n");
 }
@@ -379,38 +570,83 @@ void	PhysicsClientExample::createButtons()
 		m_guiHelper->getParameterInterface()->removeAllParameters();
 
         createButton("Load URDF",CMD_LOAD_URDF,  isTrigger);
+        createButton("Load SDF",CMD_LOAD_SDF,  isTrigger);
+		createButton("Save World",CMD_SAVE_WORLD,  isTrigger);
+        createButton("Set Shadow",CMD_SET_SHADOW, isTrigger);
+        createButton("Get Camera Image",CMD_REQUEST_CAMERA_IMAGE_DATA,isTrigger);
         createButton("Step Sim",CMD_STEP_FORWARD_SIMULATION,  isTrigger);
+		createButton("Realtime Sim",CMD_CUSTOM_SET_REALTIME_SIMULATION,  isTrigger);
+		createButton("Get Visual Shape Info",CMD_REQUEST_VISUAL_SHAPE_INFO,  isTrigger);
         createButton("Send Bullet Stream",CMD_SEND_BULLET_DATA_STREAM,  isTrigger);
-        createButton("Get State",CMD_REQUEST_ACTUAL_STATE,  isTrigger);
+		if (m_options!=eCLIENTEXAMPLE_SERVER)
+		{
+			createButton("Get State",CMD_REQUEST_ACTUAL_STATE,  isTrigger);
+		}
         createButton("Send Desired State",CMD_SEND_DESIRED_STATE,  isTrigger);
         createButton("Create Box Collider",CMD_CREATE_BOX_COLLISION_SHAPE,isTrigger);
-		createButton("Create Cylinder Body",CMD_CREATE_RIGID_BODY,isTrigger);
+				createButton("Create Cylinder Body",CMD_CREATE_RIGID_BODY,isTrigger);
         createButton("Reset Simulation",CMD_RESET_SIMULATION,isTrigger);
-		createButton("Initialize Pose",CMD_INIT_POSE,  isTrigger);
+				createButton("Initialize Pose",CMD_INIT_POSE,  isTrigger);
+        createButton("Set gravity", CMD_CUSTOM_SET_GRAVITY, isTrigger);
+		createButton("Compute Inverse Dynamics", CMD_CALCULATE_INVERSE_DYNAMICS, isTrigger);
+        createButton("Get Contact Point Info", CMD_REQUEST_CONTACT_POINT_INFORMATION, isTrigger);
 
+        if (m_bodyUniqueIds.size())
+        {
+            if (m_selectedBody<0)
+                m_selectedBody = 0;
+            
+            ComboBoxParams comboParams;
+            comboParams.m_comboboxId = 0;
+            comboParams.m_numItems = m_bodyUniqueIds.size();
+            comboParams.m_startItem = m_selectedBody;
+            comboParams.m_callback = MyComboBoxCallback;
+            comboParams.m_userPointer = this;
+            //todo: get the real object name
+
+            const char** blarray = new const char*[m_bodyUniqueIds.size()];
+            
+            for (int i=0;i<m_bodyUniqueIds.size();i++)
+            {
+                char* bla = new char[16];
+                sprintf(bla,"%d", i);
+                blarray[i] = bla;
+                comboParams.m_items=blarray;//{&bla};
+            }
+            m_guiHelper->getParameterInterface()->registerComboBox(comboParams);
+        }
+        
 
 		if (m_physicsClientHandle && m_selectedBody>=0)
 		{
+            m_numMotors = 0;
+            
 			int numJoints = b3GetNumJoints(m_physicsClientHandle,m_selectedBody);
 			for (int i=0;i<numJoints;i++)
 			{
 				b3JointInfo info;
 				b3GetJointInfo(m_physicsClientHandle,m_selectedBody,i,&info);
-				b3Printf("Joint %s at q-index %d and u-index %d\n",info.m_jointName,info.m_qIndex,info.m_uIndex);
+				//b3Printf("Joint %s at q-index %d and u-index %d\n",info.m_jointName,info.m_qIndex,info.m_uIndex);
                 
 				if (info.m_flags & JOINT_HAS_MOTORIZED_POWER)
 				{
 					if (m_numMotors<MAX_NUM_MOTORS)
 					{
 						char motorName[1024];
-						sprintf(motorName,"%s q'", info.m_jointName);
-						MyMotorInfo2* motorInfo = &m_motorTargetVelocities[m_numMotors];
+						sprintf(motorName,"%s q", info.m_jointName);
+						// MyMotorInfo2* motorInfo = &m_motorTargetVelocities[m_numMotors];
+                        MyMotorInfo2* motorInfo = &m_motorTargetPositions[m_numMotors];
 						motorInfo->m_velTarget = 0.f;
+                        motorInfo->m_posTarget = 0.f;
 						motorInfo->m_uIndex = info.m_uIndex;
+                        motorInfo->m_qIndex = info.m_qIndex;
                         
-						SliderParams slider(motorName,&motorInfo->m_velTarget);
-						slider.m_minVal=-4;
-						slider.m_maxVal=4;
+						// SliderParams slider(motorName,&motorInfo->m_velTarget);
+						// slider.m_minVal=-4;
+						// slider.m_maxVal=4;
+                        SliderParams slider(motorName,&motorInfo->m_posTarget);
+                        slider.m_minVal=-4;
+                        slider.m_maxVal=4;
 						if (m_guiHelper && m_guiHelper->getParameterInterface())
 						{
 							m_guiHelper->getParameterInterface()->registerSliderFloatParameter(slider);
@@ -438,17 +674,65 @@ void	PhysicsClientExample::initPhysics()
 	{
         MyCallback(CMD_LOAD_URDF, true, this);
         MyCallback(CMD_STEP_FORWARD_SIMULATION,true,this);
-        MyCallback(CMD_STEP_FORWARD_SIMULATION,true,this);
+        
         MyCallback(CMD_RESET_SIMULATION,true,this);
 	}
 
 	m_selectedBody = -1;
 	m_prevSelectedBody = -1;
 
-    //m_physicsClientHandle  = b3ConnectSharedMemory(m_sharedMemoryKey);
-	m_physicsClientHandle  = b3ConnectPhysicsLoopback(SHARED_MEMORY_KEY);
-	//m_physicsClientHandle = b3ConnectPhysicsDirect();
+	{
+		m_canvas = m_guiHelper->get2dCanvasInterface();
+		if (m_canvas)
+		{
+		    
+			m_canvasRGBIndex = m_canvas->createCanvas("Synthetic Camera RGB data",camVisualizerWidth, camVisualizerHeight);
+			m_canvasDepthIndex = m_canvas->createCanvas("Synthetic Camera Depth data",camVisualizerWidth, camVisualizerHeight);
+			m_canvasSegMaskIndex = m_canvas->createCanvas("Synthetic Camera Segmentation Mask",camVisualizerWidth, camVisualizerHeight);
 
+			for (int i=0;i<camVisualizerWidth;i++)
+			{
+				for (int j=0;j<camVisualizerHeight;j++)
+				{
+					unsigned char red=255;
+					unsigned char green=255;
+					unsigned char blue=255;
+					unsigned char alpha=255;
+					if (i==j)
+					{
+						red = 0;
+						green=0;
+						blue=0;
+					}
+					m_canvas->setPixel(m_canvasRGBIndex,i,j,red,green,blue,alpha);
+					m_canvas->setPixel(m_canvasDepthIndex,i,j,red,green,blue,alpha);
+					m_canvas->setPixel(m_canvasSegMaskIndex,i,j,red,green,blue,alpha);
+					
+				}
+			}
+			m_canvas->refreshImageData(m_canvasRGBIndex);
+			m_canvas->refreshImageData(m_canvasDepthIndex);
+			m_canvas->refreshImageData(m_canvasSegMaskIndex);
+			
+			
+		}
+
+	}
+
+    if (m_options == eCLIENTEXAMPLE_SERVER)
+    {
+        m_isOptionalServerConnected = m_physicsServer.connectSharedMemory( m_guiHelper);
+    }
+    
+	if (m_options == eCLIENTEXAMPLE_DIRECT)
+	{
+		m_physicsClientHandle = b3ConnectPhysicsDirect();
+	} else
+	{
+	    m_physicsClientHandle  = b3ConnectSharedMemory(m_sharedMemoryKey);
+		//m_physicsClientHandle  = b3ConnectPhysicsLoopback(SHARED_MEMORY_KEY);
+	}
+	
     if (!b3CanSubmitCommand(m_physicsClientHandle))
     {
 		b3Warning("Cannot connect to physics client");
@@ -459,6 +743,15 @@ void	PhysicsClientExample::initPhysics()
 
 void	PhysicsClientExample::stepSimulation(float deltaTime)
 {
+
+	if (m_options == eCLIENTEXAMPLE_SERVER)
+	{
+		for (int i=0;i<100;i++)
+		{
+			m_physicsServer.processClientCommands();
+		}
+	}
+
 	if (m_prevSelectedBody != m_selectedBody)
 	{
 		createButtons();
@@ -477,10 +770,198 @@ void	PhysicsClientExample::stepSimulation(float deltaTime)
 			{
 				//b3Printf("bla\n");
 			}
-      		if (statusType == CMD_URDF_LOADING_COMPLETED)
+			if (statusType ==CMD_CAMERA_IMAGE_COMPLETED)
+            {
+			//	static int counter=0;
+			//	char msg[1024];
+			//	sprintf(msg,"Camera image %d OK\n",counter++);
+				b3CameraImageData imageData;
+				b3GetCameraImageData(m_physicsClientHandle,&imageData);
+				if (m_canvas)
+				{
+				 
+				 //compute depth image range
+                 float minDepthValue = 1e20f;
+                 float maxDepthValue = -1e20f;
+                 
+                    for (int i=0;i<camVisualizerWidth;i++)
+					{
+						for (int j=0;j<camVisualizerHeight;j++)
+						{
+                            int xIndex = int(float(i)*(float(imageData.m_pixelWidth)/float(camVisualizerWidth)));
+                            int yIndex = int(float(j)*(float(imageData.m_pixelHeight)/float(camVisualizerHeight)));
+							btClamp(yIndex,0,imageData.m_pixelHeight);
+							btClamp(xIndex,0,imageData.m_pixelWidth);
+							
+                            if (m_canvasDepthIndex >=0)
+                            {
+                                int depthPixelIndex = (xIndex+yIndex*imageData.m_pixelWidth);
+                                float depthValue = imageData.m_depthValues[depthPixelIndex];
+                                //todo: rescale the depthValue to [0..255]
+                                if (depthValue>-1e20)
+                                {
+                                    maxDepthValue = btMax(maxDepthValue,depthValue);
+                                    minDepthValue = btMin(minDepthValue,depthValue);
+                                }
+                            }
+						}
+					}
+					
+					for (int i=0;i<camVisualizerWidth;i++)
+					{
+						for (int j=0;j<camVisualizerHeight;j++)
+						{
+                            int xIndex = int(float(i)*(float(imageData.m_pixelWidth)/float(camVisualizerWidth)));
+                            int yIndex = int(float(j)*(float(imageData.m_pixelHeight)/float(camVisualizerHeight)));
+							btClamp(yIndex,0,imageData.m_pixelHeight);
+							btClamp(xIndex,0,imageData.m_pixelWidth);
+							int bytesPerPixel = 4; //RGBA
+							
+							if (m_canvasRGBIndex >=0)
+                            {
+                                int rgbPixelIndex = (xIndex+yIndex*imageData.m_pixelWidth)*bytesPerPixel;
+                                m_canvas->setPixel(m_canvasRGBIndex,i,j,
+                                        imageData.m_rgbColorData[rgbPixelIndex],
+                                        imageData.m_rgbColorData[rgbPixelIndex+1],
+                                        imageData.m_rgbColorData[rgbPixelIndex+2],
+                                                   255); //alpha set to 255
+                            }
+                            
+                            if (m_canvasDepthIndex >=0)
+                            {
+                                int depthPixelIndex = (xIndex+yIndex*imageData.m_pixelWidth);
+                                float depthValue = imageData.m_depthValues[depthPixelIndex];
+                                //todo: rescale the depthValue to [0..255]
+                                if (depthValue>-1e20)
+                                {
+                                    int rgb =  (depthValue-minDepthValue)*(255. / (btFabs(maxDepthValue-minDepthValue)));
+                                    if (rgb<0 || rgb>255)
+                                    {
+                                        
+                                        printf("rgb=%d\n",rgb);
+                                    }
+                 
+                                    m_canvas->setPixel(m_canvasDepthIndex,i,j,
+                                        rgb,
+                                        rgb,
+                                        255, 255); //alpha set to 255
+                                } else
+                                {
+                                    m_canvas->setPixel(m_canvasDepthIndex,i,j,
+                                        0,
+                                        0,
+                                        0, 255); //alpha set to 255
+                                }
+                            }
+                            if (m_canvasSegMaskIndex>=0 && (0!=imageData.m_segmentationMaskValues))
+                            {
+                                int segmentationMaskPixelIndex = (xIndex+yIndex*imageData.m_pixelWidth);
+                                int segmentationMask = imageData.m_segmentationMaskValues[segmentationMaskPixelIndex];
+                                btVector4 palette[4] = {btVector4(32,255,32,255),
+                                                        btVector4(32,32,255,255),
+                                                        btVector4(255,255,32,255),
+                                                        btVector4(32,255,255,255)};
+                                if (segmentationMask>=0)
+                                {
+                                    btVector4 rgb = palette[segmentationMask&3];
+                                     m_canvas->setPixel(m_canvasSegMaskIndex,i,j,
+                                        rgb.x(),
+                                        rgb.y(),
+                                        rgb.z(), 255); //alpha set to 255
+                                } else
+                                {
+                                     m_canvas->setPixel(m_canvasSegMaskIndex,i,j,
+                                        0,
+                                        0,
+                                        0, 255); //alpha set to 255
+                                }
+                            }
+						}
+					}
+					if (m_canvasRGBIndex >=0)
+                        m_canvas->refreshImageData(m_canvasRGBIndex);
+                    if (m_canvasDepthIndex >=0)
+                        m_canvas->refreshImageData(m_canvasDepthIndex);
+                    if (m_canvasSegMaskIndex >=0)
+                        m_canvas->refreshImageData(m_canvasSegMaskIndex);
+                        
+                        
+                        
+				}
+
+               // b3Printf(msg);
+            } 
+			if (statusType == CMD_CALCULATED_INVERSE_DYNAMICS_COMPLETED)
 			{
-				int bodyIndex = b3GetStatusBodyIndex(status);
-				if (bodyIndex>=0)
+				int bodyUniqueId;
+				int dofCount;
+
+				b3GetStatusInverseDynamicsJointForces(status,
+					&bodyUniqueId,
+					&dofCount,
+					0);
+
+				btAlignedObjectArray<double> jointForces;
+				if (dofCount)
+				{
+					jointForces.resize(dofCount);
+					b3GetStatusInverseDynamicsJointForces(status,
+						0,
+						0,
+						&jointForces[0]);
+					for (int i = 0; i < dofCount; i++)
+					{
+						b3Printf("jointForces[%d]=%f", i, jointForces[i]);
+					}
+				}
+
+			}
+			if (statusType == CMD_CALCULATED_INVERSE_DYNAMICS_FAILED)
+			{
+				b3Warning("Inverse Dynamics computations failed");
+			}
+
+            if (statusType == CMD_CAMERA_IMAGE_FAILED)
+            {
+                b3Warning("Camera image FAILED\n");
+            }
+       
+            if (statusType == CMD_SDF_LOADING_COMPLETED)
+			{
+                int bodyIndicesOut[1024];
+                int bodyCapacity = 1024;
+			    int numBodies = b3GetStatusBodyIndices(status, bodyIndicesOut, bodyCapacity);
+			    if (numBodies > bodyCapacity)
+                {
+                    b3Warning("loadSDF number of bodies (%d) exceeds the internal body capacity (%d)",numBodies, bodyCapacity);
+                } else
+                {
+                    for (int i=0;i<numBodies;i++)
+                    {
+                        int bodyUniqueId = bodyIndicesOut[i];
+                        m_bodyUniqueIds.push_back(bodyUniqueId);
+                        int numJoints =  b3GetNumJoints(m_physicsClientHandle,bodyUniqueId);
+                        if (numJoints>0)
+                        {
+                            m_selectedBody = bodyUniqueId;
+                        }
+/*                        int numJoints =  b3GetNumJoints(m_physicsClientHandle,bodyUniqueId);
+                        b3Printf("numJoints = %d", numJoints);
+                        for (int i=0;i<numJoints;i++)
+                        {
+                            b3JointInfo info;
+                            b3GetJointInfo(m_physicsClientHandle,bodyUniqueId,i,&info);
+                            b3Printf("Joint %s at q-index %d and u-index %d\n",info.m_jointName,info.m_qIndex,info.m_uIndex);
+                        }
+ 
+ */
+                    }
+                }
+			    
+			    //int numJoints = b3GetNumJoints(m_physicsClientHandle,bodyIndex);
+			    
+				//int bodyIndex = b3GetStatusBodyIndex(status);
+				/*if (bodyIndex>=0)
 				{
 					int numJoints = b3GetNumJoints(m_physicsClientHandle,bodyIndex);
             
@@ -489,7 +970,6 @@ void	PhysicsClientExample::stepSimulation(float deltaTime)
 						b3JointInfo info;
 						b3GetJointInfo(m_physicsClientHandle,bodyIndex,i,&info);
 						b3Printf("Joint %s at q-index %d and u-index %d\n",info.m_jointName,info.m_qIndex,info.m_uIndex);
-				
 					}
 					ComboBoxParams comboParams;
 					comboParams.m_comboboxId = bodyIndex;
@@ -503,12 +983,58 @@ void	PhysicsClientExample::stepSimulation(float deltaTime)
 				
 					comboParams.m_items=blarray;//{&bla};
 					m_guiHelper->getParameterInterface()->registerComboBox(comboParams);
-		
-
 				}
+				*/
+			}
+			
+        
+      		if (statusType == CMD_URDF_LOADING_COMPLETED)
+			{
+				int bodyIndex = b3GetStatusBodyIndex(status);
+				if (bodyIndex>=0)
+				{
+                    m_bodyUniqueIds.push_back(bodyIndex);
+                    m_selectedBody = bodyIndex;
+					int numJoints = b3GetNumJoints(m_physicsClientHandle,bodyIndex);
+            
+					for (int i=0;i<numJoints;i++)
+					{
+						b3JointInfo info;
+						b3GetJointInfo(m_physicsClientHandle,bodyIndex,i,&info);
+						//b3Printf("Joint %s at q-index %d and u-index %d\n",info.m_jointName,info.m_qIndex,info.m_uIndex);
+					}
+					
+				}
+			}
+			if (statusType == CMD_CONTACT_POINT_INFORMATION_FAILED)
+			{
+				b3Warning("Cannot get contact information");
+			}
+			if (statusType == CMD_VISUAL_SHAPE_INFO_FAILED)
+			{
+				b3Warning("Cannot get visual shape information");
+			}
+            if (statusType == CMD_VISUAL_SHAPE_UPDATE_FAILED)
+            {
+                b3Warning("Cannot update visual shape");
+            }
+			if (statusType == CMD_VISUAL_SHAPE_INFO_COMPLETED)
+			{
+				b3VisualShapeInformation shapeInfo;
+				b3GetVisualShapeInformation(m_physicsClientHandle, &shapeInfo);
+				b3Printf("Num visual shapes: %d", shapeInfo.m_numVisualShapes);
+			}
+            if (statusType == CMD_VISUAL_SHAPE_UPDATE_COMPLETED)
+            {
+                b3Printf("Visual shape update completed.");
+            }
+			if (statusType == CMD_CONTACT_POINT_INFORMATION_COMPLETED)
+			{
+				b3ContactInformation contactPointData;
+				b3GetContactPointInformation(m_physicsClientHandle, &contactPointData);
+				b3Printf("Num Contacts: %d\n", contactPointData.m_numContactPoints);
 
 			}
-    
 		}
 	}
     if (b3CanSubmitCommand(m_physicsClientHandle))
@@ -531,21 +1057,43 @@ void	PhysicsClientExample::stepSimulation(float deltaTime)
             {
 				m_selectedBody = -1;
                 m_numMotors=0;
+                m_bodyUniqueIds.clear();
                 createButtons();
-            }
-			
-            
-            prepareAndSubmitCommand(commandId);
+				b3SharedMemoryCommandHandle commandHandle = b3InitResetSimulationCommand(m_physicsClientHandle);
+				if (m_options == eCLIENTEXAMPLE_SERVER)
+				{
+					b3SubmitClientCommand(m_physicsClientHandle, commandHandle);
+					while (!b3CanSubmitCommand(m_physicsClientHandle))
+					{
+						m_physicsServer.processClientCommands();
+						b3SharedMemoryStatusHandle status = b3ProcessServerStatus(m_physicsClientHandle);
+						bool hasStatus = (status != 0);
+						if (hasStatus)
+						{
+							//int statusType = b3GetStatusType(status);
+							//b3Printf("Status after reset: %d",statusType);
+						}
+					}
+				} else
+				{
+					prepareAndSubmitCommand(commandId);
+				}
+            } else
+			{
+	            prepareAndSubmitCommand(commandId);
+			}
             
         }  else
         {
             if (m_numMotors)
             {
                 enqueueCommand(CMD_SEND_DESIRED_STATE);
-                enqueueCommand(CMD_STEP_FORWARD_SIMULATION);
-                enqueueCommand(CMD_REQUEST_DEBUG_LINES);
-                //enqueueCommand(CMD_REQUEST_ACTUAL_STATE);
             }
+            enqueueCommand(CMD_STEP_FORWARD_SIMULATION);
+			if (m_options != eCLIENTEXAMPLE_SERVER)
+			{
+				//enqueueCommand(CMD_REQUEST_DEBUG_LINES);
+			}
         }
     }
 
@@ -557,10 +1105,11 @@ extern int gSharedMemoryKey;
 
 class CommonExampleInterface*    PhysicsClientCreateFunc(struct CommonExampleOptions& options)
 {
-    PhysicsClientExample* example = new PhysicsClientExample(options.m_guiHelper);
+    PhysicsClientExample* example = new PhysicsClientExample(options.m_guiHelper, options.m_option);
 	if (gSharedMemoryKey>=0)
 	{
 		example->setSharedMemoryKey(gSharedMemoryKey);
 	}
 	return example;
 }
+

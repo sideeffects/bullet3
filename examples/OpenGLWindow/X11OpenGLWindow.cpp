@@ -172,6 +172,8 @@ struct InternalData2
     XEvent                  m_xev;
     GLXFBConfig             m_bestFbc;
     int			    m_modifierFlags;
+    int			    m_glWidth;
+    int			    m_glHeight;
 
 #ifdef DYNAMIC_LOAD_X11_FUNCTIONS
 	//dynamically load stuff
@@ -207,6 +209,9 @@ struct InternalData2
 	InternalData2()
 	:m_dpy(0),
 	m_vi(0),
+	m_modifierFlags(0),
+	m_glWidth(-1),
+	m_glHeight(-1),
 	m_wheelCallback(0),
 	m_mouseMoveCallback(0),
 	m_mouseButtonCallback(0),
@@ -456,6 +461,7 @@ void X11OpenGLWindow::enableOpenGL()
 
   printf( "Making context current\n" );
   glXMakeCurrent( m_data->m_dpy, m_data->m_win, ctx );
+  m_data->m_glc = ctx;
 
     } else
     {
@@ -509,6 +515,9 @@ void    X11OpenGLWindow::createWindow(const b3gWindowConstructionInfo& ci)
 {
 
     m_data->m_dpy = MyXOpenDisplay(NULL);
+
+    m_data->m_glWidth = ci.m_width;
+    m_data->m_glHeight = ci.m_height;
 
     if(m_data->m_dpy == NULL) {
         printf("\n\tcannot connect to X server\n\n");
@@ -929,6 +938,9 @@ void X11OpenGLWindow::pumpMessage()
             {
   //              printf("@");
   //              fflush(0);
+		m_data->m_glWidth = m_data->m_xev.xconfigure.width;
+		m_data->m_glHeight = m_data->m_xev.xconfigure.height;
+
                 if (m_data->m_resizeCallback)
                 {
                     (*m_data->m_resizeCallback)(m_data->m_xev.xconfigure.width,m_data->m_xev.xconfigure.height);
@@ -1031,6 +1043,10 @@ void X11OpenGLWindow::setMouseButtonCallback(b3MouseButtonCallback	mouseCallback
 
 void X11OpenGLWindow::setResizeCallback(b3ResizeCallback	resizeCallback)
 {
+	if (resizeCallback && m_data->m_glWidth>0 && m_data->m_glHeight > 0)
+	{
+		resizeCallback(m_data->m_glWidth, m_data->m_glHeight);
+	}
 	m_data->m_resizeCallback = resizeCallback;
 }
 
@@ -1063,12 +1079,26 @@ b3KeyboardCallback      X11OpenGLWindow::getKeyboardCallback()
 	return m_data->m_keyboardCallback;
 }
 
+int   X11OpenGLWindow::getWidth() const
+{
+    if (m_data)
+        return m_data->m_glWidth;
+    return 0;
+}
+int   X11OpenGLWindow::getHeight() const
+{
+    if (m_data)
+        return m_data->m_glHeight;
+    return 0;
+}
+
+
 #include <stdio.h>
 
 int X11OpenGLWindow::fileOpenDialog(char* filename, int maxNameLength)
 {
 	int len = 0;
-	FILE * output = popen("zenity --file-selection --file-filter=\"*.urdf\" --file-filter=\"*.*\"","r");
+	FILE * output = popen("zenity --file-selection --file-filter=\"*.urdf\" --file-filter=\"*.sdf\"  --file-filter=\"*.obj\"  --file-filter=\"*.*\"","r");
 	if (output)
 	{
 		while( fgets(filename, maxNameLength-1, output) != NULL )
@@ -1078,7 +1108,7 @@ int X11OpenGLWindow::fileOpenDialog(char* filename, int maxNameLength)
 			{
 				filename[len-1]=0;
 				printf("file open (length=%d) = %s\n", len,filename);
-			}	
+			}
 		}
 		pclose(output);
 	} else
@@ -1087,5 +1117,5 @@ int X11OpenGLWindow::fileOpenDialog(char* filename, int maxNameLength)
 	}
 	MyXRaiseWindow(m_data->m_dpy, m_data->m_win);
 	return len;
-	
+
 }

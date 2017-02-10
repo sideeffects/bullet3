@@ -3,8 +3,10 @@
 #include "Bullet3Common/b3Vector3.h"
 #include "Bullet3Common/b3Quaternion.h"
 #include "Bullet3Common/b3Matrix3x3.h"
+#include "Bullet3Common/b3Transform.h"
 
-struct SimpleCameraInternalData
+
+B3_ATTRIBUTE_ALIGNED16(struct) SimpleCameraInternalData
 {
 	SimpleCameraInternalData()
 		:m_cameraTargetPosition(b3MakeVector3(0,0,0)),
@@ -16,10 +18,18 @@ struct SimpleCameraInternalData
 		m_pitch(0),
 		m_aspect(1),
  		m_frustumZNear(0.01),
-                m_frustumZFar(1000)
+		m_frustumZFar(1000),
+		m_enableVR(false)
 	{
+		b3Transform tr;
+		tr.setIdentity();
+		tr.getOpenGLMatrix(m_offsetTransformVR);
 	}
-	b3Vector3 m_cameraTargetPosition;
+	
+    B3_DECLARE_ALIGNED_ALLOCATOR();
+    
+    B3_ATTRIBUTE_ALIGNED16(float) m_offsetTransformVR[16];
+    b3Vector3 m_cameraTargetPosition;
 	float m_cameraDistance;
 	b3Vector3 m_cameraUp;
 	b3Vector3 m_cameraForward;
@@ -32,6 +42,11 @@ struct SimpleCameraInternalData
 	float m_aspect;
 	float m_frustumZNear;
     float m_frustumZFar;
+
+	bool m_enableVR;
+	float m_viewMatrixVR[16];
+	float m_projectionMatrixVR[16];
+	
 };
 
 
@@ -46,7 +61,40 @@ SimpleCamera::~SimpleCamera()
 	delete m_data;
 }
 
+void	SimpleCamera::setVRCamera(const float viewMat[16], const float projectionMatrix[16])
+{
+	m_data->m_enableVR = true;
+	for (int i=0;i<16;i++)
+	{
+		m_data->m_viewMatrixVR[i] = viewMat[i];
+		m_data->m_projectionMatrixVR[i] = projectionMatrix[i];
+	}
+}
 
+bool	SimpleCamera::getVRCamera(float viewMat[16], float projectionMatrix[16])
+{
+	if (m_data->m_enableVR)
+	{
+		for (int i=0;i<16;i++)
+		{
+			viewMat[i] = m_data->m_viewMatrixVR[i];
+			projectionMatrix[i] = m_data->m_projectionMatrixVR[i];
+		}
+	}
+	return false;
+}
+
+
+
+void SimpleCamera::disableVRCamera()
+{
+	m_data->m_enableVR = false;
+}
+
+bool SimpleCamera::isVRCamera() const
+{
+	return m_data->m_enableVR ;
+}
 
 
 static void    b3CreateFrustum(
@@ -171,7 +219,7 @@ void SimpleCamera::update()
 		break;
     default:
 		{
-			b3Assert(0);
+			//b3Assert(0);
 			return;
 		}
 	};
@@ -209,11 +257,42 @@ void SimpleCamera::update()
 
 void SimpleCamera::getCameraProjectionMatrix(float projectionMatrix[16]) const
 {
-	b3CreateFrustum(-m_data->m_aspect * m_data->m_frustumZNear, m_data->m_aspect * m_data->m_frustumZNear, -m_data->m_frustumZNear,m_data->m_frustumZNear, m_data->m_frustumZNear, m_data->m_frustumZFar,projectionMatrix);
+	if (m_data->m_enableVR)
+	{
+		for (int i=0;i<16;i++)
+		{
+			projectionMatrix[i] = m_data->m_projectionMatrixVR[i];
+		}
+	} else
+	{
+		b3CreateFrustum(-m_data->m_aspect * m_data->m_frustumZNear, m_data->m_aspect * m_data->m_frustumZNear, -m_data->m_frustumZNear,m_data->m_frustumZNear, m_data->m_frustumZNear, m_data->m_frustumZFar,projectionMatrix);
+	}
+}
+void	SimpleCamera::setVRCameraOffsetTransform(const float offset[16])
+{
+	for (int i=0;i<16;i++)
+	{
+		m_data->m_offsetTransformVR[i]   = offset[i];
+	}
 }
 void SimpleCamera::getCameraViewMatrix(float viewMatrix[16]) const
 {
-	b3CreateLookAt(m_data->m_cameraPosition,m_data->m_cameraTargetPosition,m_data->m_cameraUp,viewMatrix);
+	if (m_data->m_enableVR)
+	{
+		for (int i=0;i<16;i++)
+		{
+			b3Transform tr;
+			tr.setFromOpenGLMatrix(m_data->m_viewMatrixVR);
+			b3Transform shift=b3Transform::getIdentity();
+			shift.setFromOpenGLMatrix(m_data->m_offsetTransformVR);
+			tr = tr*shift;
+			tr.getOpenGLMatrix(viewMatrix);
+			//viewMatrix[i] = m_data->m_viewMatrixVR[i];
+		}
+	} else
+	{
+		b3CreateLookAt(m_data->m_cameraPosition,m_data->m_cameraTargetPosition,m_data->m_cameraUp,viewMatrix);
+	}
 }
 
 void SimpleCamera::getCameraTargetPosition(double pos[3]) const

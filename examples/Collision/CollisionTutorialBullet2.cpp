@@ -61,8 +61,8 @@ class CollisionTutorialBullet2 : public CommonExampleInterface
 	plCollisionSdkHandle m_collisionSdkHandle;
 	plCollisionWorldHandle m_collisionWorldHandle;
 	
-	int m_stage;
-	int m_counter;
+//	int m_stage;
+//	int m_counter;
 	
 public:
     
@@ -70,11 +70,11 @@ public:
     :m_app(guiHelper->getAppInterface()),
 	m_guiHelper(guiHelper),
 	m_tutorialIndex(tutorialIndex),
+	m_timeSeriesCanvas0(0),
 	m_collisionSdkHandle(0),
-	m_collisionWorldHandle(0),
-	m_stage(0),
-	m_counter(0),
-	m_timeSeriesCanvas0(0)
+	m_collisionWorldHandle(0)
+//	m_stage(0),
+//	m_counter(0)
     {
 		
 		gTotalPoints = 0;
@@ -226,7 +226,7 @@ public:
 				{
 					char relativeFileName[1024];
 					sprintf(relativeFileName,"%s%s",prefix[i],filename);
-					image = stbi_load(relativeFileName, &width, &height, &n, 0);
+					image = stbi_load(relativeFileName, &width, &height, &n, 3);
 				}
 				
 				b3Assert(image);
@@ -265,8 +265,9 @@ public:
 	
     virtual void	stepSimulation(float deltaTime)
     {
+#ifndef BT_NO_PROFILE
 		CProfileManager::Reset();
-		
+#endif
 		
 		
 		
@@ -314,7 +315,9 @@ public:
 	
 	
 		 m_app->m_renderer->writeTransforms();
+#ifndef BT_NO_PROFILE
 		 CProfileManager::Increment_Frame_Counter();
+#endif
     }
     virtual void	renderScene()
     {

@@ -74,17 +74,41 @@ bool PhysicsLoopBack::submitClientCommand(const struct SharedMemoryCommand& comm
 	return  m_data->m_physicsClient->submitClientCommand(command);
 }
 
+int PhysicsLoopBack::getNumBodies() const
+{
+	return m_data->m_physicsClient->getNumBodies();
+}
+
+int PhysicsLoopBack::getBodyUniqueId(int serialIndex) const
+{
+	return m_data->m_physicsClient->getBodyUniqueId(serialIndex);
+}
+
+bool PhysicsLoopBack::getBodyInfo(int bodyUniqueId, struct b3BodyInfo& info) const
+{
+	return m_data->m_physicsClient->getBodyInfo(bodyUniqueId, info);
+}
+
 int PhysicsLoopBack::getNumJoints(int bodyIndex) const
 {
 	return m_data->m_physicsClient->getNumJoints(bodyIndex);
 }
 
-void PhysicsLoopBack::getJointInfo(int bodyIndex, int jointIndex, struct b3JointInfo& info) const
+bool PhysicsLoopBack::getJointInfo(int bodyIndex, int jointIndex, struct b3JointInfo& info) const
 {
-	m_data->m_physicsClient->getJointInfo(bodyIndex,jointIndex,info);
+	return m_data->m_physicsClient->getJointInfo(bodyIndex,jointIndex,info);
 }
 
-///todo: move this out of the
+int PhysicsLoopBack::getNumUserConstraints() const
+{
+    return m_data->m_physicsClient->getNumUserConstraints();
+}
+int PhysicsLoopBack::getUserConstraintInfo(int constraintUniqueId, struct b3UserConstraint&info) const
+{
+    return m_data->m_physicsClient->getUserConstraintInfo( constraintUniqueId, info);
+}
+
+///todo: move this out of the interface
 void PhysicsLoopBack::setSharedMemoryKey(int key)
 {
 	m_data->m_physicsServer->setSharedMemoryKey(key);
@@ -105,11 +129,43 @@ const float* PhysicsLoopBack::getDebugLinesFrom() const
 {
 	return m_data->m_physicsClient->getDebugLinesFrom();
 }
+
 const float* PhysicsLoopBack::getDebugLinesTo() const
 {
 	return m_data->m_physicsClient->getDebugLinesTo();
 }
+
 const float* PhysicsLoopBack::getDebugLinesColor() const
 {
 	return m_data->m_physicsClient->getDebugLinesColor();
+}
+
+void PhysicsLoopBack::getCachedCameraImage(struct b3CameraImageData* cameraData)
+{
+	return m_data->m_physicsClient->getCachedCameraImage(cameraData);
+}
+
+void PhysicsLoopBack::getCachedContactPointInformation(struct b3ContactInformation* contactPointData)
+{
+    return m_data->m_physicsClient->getCachedContactPointInformation(contactPointData);
+}
+
+void PhysicsLoopBack::getCachedVisualShapeInformation(struct b3VisualShapeInformation* visualShapesInfo)
+{
+	return m_data->m_physicsClient->getCachedVisualShapeInformation(visualShapesInfo);
+}
+
+void PhysicsLoopBack::getCachedVREvents(struct b3VREventsData* vrEventsData)
+{
+	return m_data->m_physicsClient->getCachedVREvents(vrEventsData);
+}
+
+void PhysicsLoopBack::getCachedOverlappingObjects(struct b3AABBOverlapData* overlappingObjects)
+{
+	return m_data->m_physicsClient->getCachedOverlappingObjects(overlappingObjects);
+}
+
+void PhysicsLoopBack::getCachedRaycastHits(struct b3RaycastInformation* raycastHits)
+{
+	return m_data->m_physicsClient->getCachedRaycastHits(raycastHits);
 }

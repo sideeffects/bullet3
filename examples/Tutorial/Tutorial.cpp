@@ -292,11 +292,11 @@ public:
     :m_app(guiHelper->getAppInterface()),
 	m_guiHelper(guiHelper),
 	m_tutorialIndex(tutorialIndex),
-	m_stage(0),
-	m_counter(0),
 	m_timeSeriesCanvas0(0),
-	m_timeSeriesCanvas1(0)
-    {
+	m_timeSeriesCanvas1(0),
+	m_stage(0),
+	m_counter(0)	
+	{
 		int numBodies = 1;
 		
 		m_app->setUpAxis(1);
@@ -415,7 +415,7 @@ public:
 				{
 					char relativeFileName[1024];
 					sprintf(relativeFileName,"%s%s",prefix[i],filename);
-					image = stbi_load(relativeFileName, &width, &height, &n, 0);
+					image = stbi_load(relativeFileName, &width, &height, &n, 3);
 				}
 				
 				b3Assert(image);

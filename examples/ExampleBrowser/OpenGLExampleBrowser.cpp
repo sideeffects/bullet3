@@ -17,7 +17,7 @@
 #endif //_WIN32
 #endif//__APPLE__
 #include "../ThirdPartyLibs/Gwen/Renderers/OpenGL_DebugFont.h"
-
+#include "LinearMath/btThreads.h"
 #include "Bullet3Common/b3Vector3.h"
 #include "assert.h"
 #include <stdio.h>
@@ -25,7 +25,9 @@
 #include "GwenGUISupport/gwenUserInterface.h"
 #include "../Utils/b3Clock.h"
 #include "GwenGUISupport/GwenParameterInterface.h"
+#ifndef BT_NO_PROFILE
 #include "GwenGUISupport/GwenProfileWindow.h"
+#endif
 #include "GwenGUISupport/GwenTextureWindow.h"
 #include "GwenGUISupport/GraphingTexture.h"
 #include "../CommonInterfaces/Common2dCanvasInterface.h"
@@ -42,28 +44,78 @@
 #include "../Importers/ImportURDFDemo/ImportURDFSetup.h"
 #include "../Importers/ImportBullet/SerializeSetup.h"
 
+#include "Bullet3Common/b3HashMap.h"
+
+struct GL3TexLoader : public MyTextureLoader
+{
+	b3HashMap<b3HashString, GLint> m_hashMap;
+
+	virtual void LoadTexture(Gwen::Texture* pTexture)
+	{
+		Gwen::String namestr = pTexture->name.Get();
+		const char* n = namestr.c_str();
+		GLint* texIdPtr = m_hashMap[n];
+		if (texIdPtr)
+		{
+			pTexture->m_intData = *texIdPtr;
+		}
+	}
+	virtual void FreeTexture(Gwen::Texture* pTexture)
+	{
+	}
+};
+
+
+struct OpenGLExampleBrowserInternalData
+{
+	Gwen::Renderer::Base* m_gwenRenderer;
+	CommonGraphicsApp* m_app;
+#ifndef BT_NO_PROFILE
+	MyProfileWindow* m_profWindow;
+#endif //BT_NO_PROFILE
+	btAlignedObjectArray<Gwen::Controls::TreeNode*> m_nodes;
+	GwenUserInterface* m_gui;
+	GL3TexLoader* m_myTexLoader;
+	struct MyMenuItemHander* m_handler2;
+	btAlignedObjectArray<MyMenuItemHander*> m_handlers;
+
+	OpenGLExampleBrowserInternalData()
+		: m_gwenRenderer(0),
+		m_app(0),
+//		m_profWindow(0),
+		m_gui(0),
+		m_myTexLoader(0),
+		m_handler2(0)
+	{
+
+	}
+};
+
 static CommonGraphicsApp* s_app=0;
 
 static CommonWindowInterface* s_window = 0;
 static CommonParameterInterface*	s_parameterInterface=0;
 static CommonRenderInterface*	s_instancingRenderer=0;
 static OpenGLGuiHelper*	s_guiHelper=0;
+#ifndef BT_NO_PROFILE
 static MyProfileWindow* s_profWindow =0;
+#endif //BT_NO_PROFILE
+static SharedMemoryInterface* sSharedMem = 0;
 
 #define DEMO_SELECTION_COMBOBOX 13
 const char* startFileName = "0_Bullet3Demo.txt";
 char staticPngFileName[1024];
-static GwenUserInterface* gui  = 0;
+//static GwenUserInterface* gui  = 0;
+static GwenUserInterface* gui2 = 0;
 static int sCurrentDemoIndex = -1;
 static int sCurrentHightlighted = 0;
 static CommonExampleInterface* sCurrentDemo = 0;
 static b3AlignedObjectArray<const char*> allNames;
 static float gFixedTimeStep = 0;
 bool gAllowRetina = true;
-
+bool gDisableDemoSelection = false;
 static class ExampleEntries* gAllExamples=0;
 bool sUseOpenGL2 = false;
-bool drawGUI=true;
 #ifndef USE_OPENGL3
 extern bool useShadowMap;
 #endif
@@ -76,6 +128,7 @@ static bool enable_experimental_opencl = false;
 
 int gDebugDrawFlags = 0;
 static bool pauseSimulation=false;
+static bool singleStepSimulation = false;
 int midiBaseIndex = 176;
 extern bool gDisableDeactivation;
 
@@ -86,14 +139,234 @@ int gSharedMemoryKey=-1;
 
 int gPreferredOpenCLDeviceIndex=-1;
 int gPreferredOpenCLPlatformIndex=-1;
-int gGpuArraySizeX=15;
-int gGpuArraySizeY=15;
-int gGpuArraySizeZ=15;
+int gGpuArraySizeX=45;
+int gGpuArraySizeY=55;
+int gGpuArraySizeZ=45;
 
 //#include <float.h>
 //unsigned int fp_control_state = _controlfp(_EM_INEXACT, _MCW_EM);
 
 
+
+
+struct btTiming
+{
+	const char* m_name;
+	int m_threadId;
+	unsigned long long int m_usStartTime;
+	unsigned long long int m_usEndTime;
+};
+
+FILE* gTimingFile = 0;
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif //__STDC_FORMAT_MACROS
+
+//see http://stackoverflow.com/questions/18107426/printf-format-for-unsigned-int64-on-windows
+#ifndef _WIN32
+#include <inttypes.h>
+#endif
+
+#define BT_TIMING_CAPACITY 16*65536
+static bool m_firstTiming = true;
+
+
+struct btTimings
+{
+	btTimings()
+		:m_numTimings(0),
+		m_activeBuffer(0)
+	{
+		
+	}
+	void flush()
+	{
+		for (int i=0;i<m_numTimings;i++)
+		{
+			const char* name = m_timings[m_activeBuffer][i].m_name;
+			int threadId = m_timings[m_activeBuffer][i].m_threadId;
+			unsigned long long int startTime = m_timings[m_activeBuffer][i].m_usStartTime;
+			unsigned long long int endTime = m_timings[m_activeBuffer][i].m_usEndTime;
+
+			if (!m_firstTiming)
+			{
+				fprintf(gTimingFile,",\n");
+			}
+
+			m_firstTiming = false;
+
+            unsigned long long int startTimeDiv1000 = startTime/1000;
+            unsigned long long int endTimeDiv1000 = endTime/1000;
+
+#if 0
+
+            fprintf(gTimingFile,"{\"cat\":\"timing\",\"pid\":1,\"tid\":%d,\"ts\":%" PRIu64 ".123 ,\"ph\":\"B\",\"name\":\"%s\",\"args\":{}},\n",
+                    threadId, startTimeDiv1000, name);
+            fprintf(gTimingFile,"{\"cat\":\"timing\",\"pid\":1,\"tid\":%d,\"ts\":%" PRIu64 ".234 ,\"ph\":\"E\",\"name\":\"%s\",\"args\":{}}",
+                    threadId, endTimeDiv1000,name);
+
+#else
+         
+			
+			if (startTime>endTime)
+			{
+				endTime = startTime;
+			}
+            unsigned int startTimeRem1000 = startTime%1000;
+            unsigned int endTimeRem1000 = endTime%1000;
+
+            char startTimeRem1000Str[16];
+            char endTimeRem1000Str[16];
+            
+            if (startTimeRem1000<10)
+            {
+                sprintf(startTimeRem1000Str,"00%d",startTimeRem1000);
+            }
+            else
+            {
+                if (startTimeRem1000<100)
+                {
+                    sprintf(startTimeRem1000Str,"0%d",startTimeRem1000);
+                } else
+                {
+                    sprintf(startTimeRem1000Str,"%d",startTimeRem1000);
+                }
+            }
+            
+            if (endTimeRem1000<10)
+            {
+                sprintf(endTimeRem1000Str,"00%d",endTimeRem1000);
+            }
+            else
+            {
+                if (endTimeRem1000<100)
+                {
+                    sprintf(endTimeRem1000Str,"0%d",endTimeRem1000);
+                } else
+                {
+                    sprintf(endTimeRem1000Str,"%d",endTimeRem1000);
+                }
+            }
+            
+            char newname[1024];
+			static int counter2=0;
+            sprintf(newname,"%s%d",name,counter2++);
+         
+#ifdef _WIN32
+			
+			fprintf(gTimingFile,"{\"cat\":\"timing\",\"pid\":1,\"tid\":%d,\"ts\":%I64d.%s ,\"ph\":\"B\",\"name\":\"%s\",\"args\":{}},\n",
+				threadId, startTimeDiv1000,startTimeRem1000Str, newname);
+			fprintf(gTimingFile,"{\"cat\":\"timing\",\"pid\":1,\"tid\":%d,\"ts\":%I64d.%s ,\"ph\":\"E\",\"name\":\"%s\",\"args\":{}}",
+				threadId, endTimeDiv1000,endTimeRem1000Str,newname);
+
+#else
+			fprintf(gTimingFile,"{\"cat\":\"timing\",\"pid\":1,\"tid\":%d,\"ts\":%" PRIu64 ".%s ,\"ph\":\"B\",\"name\":\"%s\",\"args\":{}},\n",
+				threadId, startTimeDiv1000,startTimeRem1000Str, newname);
+			fprintf(gTimingFile,"{\"cat\":\"timing\",\"pid\":1,\"tid\":%d,\"ts\":%" PRIu64 ".%s ,\"ph\":\"E\",\"name\":\"%s\",\"args\":{}}",
+				threadId, endTimeDiv1000,endTimeRem1000Str,newname);
+#endif
+#endif
+
+		}
+		m_numTimings = 0;
+
+	}
+
+	void addTiming(const char* name, int threadId, unsigned long long int startTime,  unsigned long long int endTime)
+	{
+		if (m_numTimings>=BT_TIMING_CAPACITY)
+		{
+			return;
+		}
+
+		if (m_timings[0].size()==0)
+		{
+			m_timings[0].resize(BT_TIMING_CAPACITY);
+		}
+
+		int slot = m_numTimings++;
+
+		m_timings[m_activeBuffer][slot].m_name = name;
+		m_timings[m_activeBuffer][slot].m_threadId = threadId;
+		m_timings[m_activeBuffer][slot].m_usStartTime = startTime;
+		m_timings[m_activeBuffer][slot].m_usEndTime = endTime;
+	}
+
+
+	int m_numTimings;
+	int m_activeBuffer;
+	btAlignedObjectArray<btTiming> m_timings[1];
+};
+#ifndef BT_NO_PROFILE
+btTimings gTimings[BT_QUICKPROF_MAX_THREAD_COUNT];
+#define MAX_NESTING 1024
+int gStackDepths[BT_QUICKPROF_MAX_THREAD_COUNT] = {0};
+const char* gFuncNames[BT_QUICKPROF_MAX_THREAD_COUNT][MAX_NESTING];
+unsigned long long int gStartTimes[BT_QUICKPROF_MAX_THREAD_COUNT][MAX_NESTING];
+#endif
+
+btClock clk;
+
+
+
+bool gProfileDisabled = true;
+
+
+void MyDummyEnterProfileZoneFunc(const char* msg)
+{
+}
+
+void MyDummyLeaveProfileZoneFunc()
+{
+}
+
+void MyEnterProfileZoneFunc(const char* msg)
+{
+	if (gProfileDisabled)
+		return;
+#ifndef BT_NO_PROFILE
+	int threadId = btQuickprofGetCurrentThreadIndex2();
+	if (threadId<0)
+		return;
+	
+	if (gStackDepths[threadId]>=MAX_NESTING)
+	{
+		btAssert(0);
+		return;
+	}
+	gFuncNames[threadId][gStackDepths[threadId]] = msg;
+	gStartTimes[threadId][gStackDepths[threadId]] = clk.getTimeNanoseconds();
+	if (gStartTimes[threadId][gStackDepths[threadId]]<=gStartTimes[threadId][gStackDepths[threadId]-1])
+	{
+		gStartTimes[threadId][gStackDepths[threadId]]=1+gStartTimes[threadId][gStackDepths[threadId]-1];
+	}
+	gStackDepths[threadId]++;
+#endif
+
+}
+void MyLeaveProfileZoneFunc()
+{
+	if (gProfileDisabled)
+		return;
+#ifndef BT_NO_PROFILE
+	int threadId = btQuickprofGetCurrentThreadIndex2();
+	if (threadId<0)
+		return;
+	
+	if (gStackDepths[threadId]<=0)
+	{
+		return;
+	}
+
+	gStackDepths[threadId]--;
+
+	const char* name = gFuncNames[threadId][gStackDepths[threadId]];
+	unsigned long long int startTime = gStartTimes[threadId][gStackDepths[threadId]];
+	
+	unsigned long long int endTime = clk.getTimeNanoseconds();
+	gTimings[threadId].addTiming(name,threadId,startTime,endTime);
+#endif //BT_NO_PROFILE
+}
 
 
 void deleteDemo()
@@ -106,10 +379,13 @@ void deleteDemo()
 		sCurrentDemo=0;
 		delete s_guiHelper;
 		s_guiHelper = 0;
+
+//		CProfileManager::CleanupMemory();
 	}
 }
 
 const char* gPngFileName = 0;
+int gPngSkipFrames = 0;
 
 
 
@@ -122,9 +398,9 @@ void MyKeyboardCallback(int key, int state)
 	//b3Printf("key=%d, state=%d", key, state);
 	bool handled = false;
 	
-	if (gui && !handled )
+	if (gui2 && !handled )
 	{
-		handled = gui->keyboardCallback(key, state);
+		handled = gui2->keyboardCallback(key, state);
 	}
 	
 	if (!handled && sCurrentDemo)
@@ -145,7 +421,6 @@ void MyKeyboardCallback(int key, int state)
 	}
 	if (key=='c' && state)
 	{
-		gDebugDrawFlags ^= btIDebugDraw::DBG_DrawConstraints;
 		gDebugDrawFlags ^= btIDebugDraw::DBG_DrawContactPoints;
 	}
 	if (key == 'd' && state)
@@ -153,6 +428,11 @@ void MyKeyboardCallback(int key, int state)
 		gDebugDrawFlags ^= btIDebugDraw::DBG_NoDeactivation;
 		gDisableDeactivation = ((gDebugDrawFlags & btIDebugDraw::DBG_NoDeactivation) != 0);
 	}
+	if (key == 'k' && state)
+	{
+		gDebugDrawFlags ^= btIDebugDraw::DBG_DrawConstraints;
+	}
+
 	if (key=='l' && state)
 	{
 		gDebugDrawFlags ^= btIDebugDraw::DBG_DrawConstraintLimits;
@@ -179,6 +459,54 @@ void MyKeyboardCallback(int key, int state)
 	{
 		pauseSimulation = !pauseSimulation;
 	}
+	if (key == 'o' && state)
+	{
+		singleStepSimulation = true;
+	}
+
+	if (key=='p')
+	{
+#ifndef BT_NO_PROFILE
+		if (state)
+		{
+			m_firstTiming = true;
+			gProfileDisabled = false;//true;
+			b3SetCustomEnterProfileZoneFunc(MyEnterProfileZoneFunc);
+			b3SetCustomLeaveProfileZoneFunc(MyLeaveProfileZoneFunc);
+
+			//also for Bullet 2.x API
+			btSetCustomEnterProfileZoneFunc(MyEnterProfileZoneFunc);
+			btSetCustomLeaveProfileZoneFunc(MyLeaveProfileZoneFunc);
+		} else
+		{
+
+			b3SetCustomEnterProfileZoneFunc(MyDummyEnterProfileZoneFunc);
+			b3SetCustomLeaveProfileZoneFunc(MyDummyLeaveProfileZoneFunc);
+			//also for Bullet 2.x API
+			btSetCustomEnterProfileZoneFunc(MyDummyEnterProfileZoneFunc);
+			btSetCustomLeaveProfileZoneFunc(MyDummyLeaveProfileZoneFunc);
+			char fileName[1024];
+			static int fileCounter = 0;
+			sprintf(fileName,"timings_%d.json",fileCounter++);
+			gTimingFile = fopen(fileName,"w");
+			fprintf(gTimingFile,"{\"traceEvents\":[\n");
+			//dump the content to file
+			for (int i=0;i<BT_QUICKPROF_MAX_THREAD_COUNT;i++)
+			{
+				if (gTimings[i].m_numTimings)
+				{
+					printf("Writing %d timings for thread %d\n", gTimings[i].m_numTimings, i);
+					gTimings[i].flush();
+				}
+			}
+			fprintf(gTimingFile,"\n],\n\"displayTimeUnit\": \"ns\"}");
+			fclose(gTimingFile);
+			gTimingFile = 0;
+
+		}
+#endif //BT_NO_PROFILE
+	}
+
 #ifndef NO_OPENGL3
 	if (key=='s' && state)
 	{
@@ -222,11 +550,11 @@ void MyKeyboardCallback(int key, int state)
 b3MouseMoveCallback prevMouseMoveCallback = 0;
 static void MyMouseMoveCallback( float x, float y)
 {
-	bool handled = false;
+  	bool handled = false;
 	if (sCurrentDemo)
 		handled = sCurrentDemo->mouseMoveCallback(x,y);
-	if (!handled && gui)
-		handled = gui->mouseMoveCallback(x,y);
+	if (!handled && gui2)
+		handled = gui2->mouseMoveCallback(x,y);
 	if (!handled)
 	{
 		if (prevMouseMoveCallback)
@@ -243,8 +571,8 @@ static void MyMouseButtonCallback(int button, int state, float x, float y)
 	if (sCurrentDemo)
 		handled = sCurrentDemo->mouseButtonCallback(button,state,x,y);
 
-	if (!handled && gui)
-		handled = gui->mouseButtonCallback(button,state,x,y);
+	if (!handled && gui2)
+		handled = gui2->mouseButtonCallback(button,state,x,y);
 
 	if (!handled)
 	{
@@ -255,19 +583,26 @@ static void MyMouseButtonCallback(int button, int state, float x, float y)
 }
 
 #include <string.h>
+struct FileImporterByExtension
+{
+    std::string m_extension;
+    CommonExampleInterface::CreateFunc*		m_createFunc;
+};
+
+static btAlignedObjectArray<FileImporterByExtension> gFileImporterByExtension;
+
+void OpenGLExampleBrowser::registerFileImporter(const char* extension, CommonExampleInterface::CreateFunc*		createFunc)
+{
+    FileImporterByExtension fi;
+    fi.m_extension = extension;
+    fi.m_createFunc = createFunc;
+    gFileImporterByExtension.push_back(fi);
+}
 
 void openFileDemo(const char* filename)
 {
 
-    if (sCurrentDemo)
-    {
-		sCurrentDemo->exitPhysics();
-		s_instancingRenderer->removeAllInstances();
-		delete sCurrentDemo;
-		sCurrentDemo=0;
-		delete s_guiHelper;
-		s_guiHelper = 0;
-    }
+	deleteDemo();
    
 	s_guiHelper= new OpenGLGuiHelper(s_app, sUseOpenGL2);
     s_parameterInterface->removeAllParameters();
@@ -278,20 +613,15 @@ void openFileDemo(const char* filename)
 	char fullPath[1024];
 	sprintf(fullPath, "%s", filename);
 	b3FileUtils::toLower(fullPath);
-	if (strstr(fullPath, ".urdf"))
-	{
-		sCurrentDemo = ImportURDFCreateFunc(options);
-	} else
-	{
-		if (strstr(fullPath, ".bullet"))
-		{
-			sCurrentDemo = SerializeBulletCreateFunc(options);
-		}
-	}
+	
+	for (int i=0;i<gFileImporterByExtension.size();i++)
+    {
+        if (strstr(fullPath, gFileImporterByExtension[i].m_extension.c_str()))
+        {
+            sCurrentDemo = gFileImporterByExtension[i].m_createFunc(options);
+        }   
+    }
     
-
-	//physicsSetup->setFileName(filename);
-
 	
     if (sCurrentDemo)
     {
@@ -318,23 +648,31 @@ void selectDemo(int demoIndex)
 		demoIndex = 0;
 	}
 	deleteDemo();
+
     
 	CommonExampleInterface::CreateFunc* func = gAllExamples->getExampleCreateFunc(demoIndex);
 	if (func)
 	{
-		s_parameterInterface->removeAllParameters();
+		if (s_parameterInterface)
+		{
+			s_parameterInterface->removeAllParameters();
+		}
 		int option = gAllExamples->getExampleOption(demoIndex);
 		s_guiHelper= new OpenGLGuiHelper(s_app, sUseOpenGL2);
 		CommonExampleOptions options(s_guiHelper, option);
+		options.m_sharedMem = sSharedMem;
 		sCurrentDemo = (*func)(options);
 		if (sCurrentDemo)
 		{
-			if (gui)
+			if (gui2)
 			{
-				gui->setStatusBarMessage("Status: OK", false);
+				gui2->setStatusBarMessage("Status: OK", false);
 			}
 			b3Printf("Selected demo: %s",gAllExamples->getExampleName(demoIndex));
-			gui->setExampleDescription(gAllExamples->getExampleDescription(demoIndex));
+			if (gui2)
+			{
+				gui2->setExampleDescription(gAllExamples->getExampleDescription(demoIndex));
+			}
 			
 			sCurrentDemo->initPhysics();
 			if(resetCamera)
@@ -383,11 +721,10 @@ static void saveCurrentSettings(int currentEntry,const char* startFileName)
 
 static void loadCurrentSettings(const char* startFileName, b3CommandLineArgs& args)
 {
-	int currentEntry= 0;
+	//int currentEntry= 0;
 	FILE* f = fopen(startFileName,"r");
 	if (f)
 	{
-		int result;
 		char oneline[1024];
 		char* argv[] = {0,&oneline[0]};
 		
@@ -422,14 +759,16 @@ void	MyComboBoxCallback(int comboId, const char* item)
 
 }
 
+//in case of multi-threading, don't submit messages while the GUI is rendering (causing crashes)
+static bool gBlockGuiMessages = false;
 
 void MyGuiPrintf(const char* msg)
 {
 	printf("b3Printf: %s\n",msg);
-	if (gui)
+	if (!gDisableDemoSelection && !gBlockGuiMessages)
 	{
-		gui->textOutput(msg);
-		gui->forceUpdateScrollBars();
+		gui2->textOutput(msg);
+		gui2->forceUpdateScrollBars();
 	}
 }
 
@@ -438,10 +777,10 @@ void MyGuiPrintf(const char* msg)
 void MyStatusBarPrintf(const char* msg)
 {
 	printf("b3Printf: %s\n", msg);
-	if (gui)
+	if (!gDisableDemoSelection && !gBlockGuiMessages)
 	{
 		bool isLeft = true;
-		gui->setStatusBarMessage(msg,isLeft);
+		gui2->setStatusBarMessage(msg,isLeft);
 	}
 }
 
@@ -449,13 +788,15 @@ void MyStatusBarPrintf(const char* msg)
 void MyStatusBarError(const char* msg)
 {
 	printf("Warning: %s\n", msg);
-	if (gui)
+	if (!gDisableDemoSelection && !gBlockGuiMessages)
 	{
 		bool isLeft = false;
-		gui->setStatusBarMessage(msg,isLeft);
-		gui->textOutput(msg);
-		gui->forceUpdateScrollBars();
+		gui2->setStatusBarMessage(msg,isLeft);
+		gui2->textOutput(msg);
+		gui2->forceUpdateScrollBars();
 	}
+  btAssert(0);
+
 }
 
 struct MyMenuItemHander :public Gwen::Event::Handler
@@ -490,9 +831,11 @@ struct MyMenuItemHander :public Gwen::Event::Handler
 		Gwen::String laa = Gwen::Utility::UnicodeToString(la);
 		//const char* ha = laa.c_str();
 
-		
-		selectDemo(sCurrentHightlighted);
-		saveCurrentSettings(sCurrentDemoIndex, startFileName);
+		if (!gDisableDemoSelection )
+		{
+			selectDemo(sCurrentHightlighted);
+			saveCurrentSettings(sCurrentDemoIndex, startFileName);
+		}
 	}
 	void onButtonC(Gwen::Controls::Base* pControl)
 	{
@@ -514,8 +857,11 @@ struct MyMenuItemHander :public Gwen::Event::Handler
 		*/
 
 	//	printf("onKeyReturn ! \n");
-		selectDemo(sCurrentHightlighted);
-		saveCurrentSettings(sCurrentDemoIndex, startFileName);
+		if (!gDisableDemoSelection )
+		{
+			selectDemo(sCurrentHightlighted);
+			saveCurrentSettings(sCurrentDemoIndex, startFileName);
+		}
 
 	}
 
@@ -523,7 +869,7 @@ struct MyMenuItemHander :public Gwen::Event::Handler
 	{
 	//	printf("select %d\n",m_buttonId);
 		sCurrentHightlighted = m_buttonId;
-		gui->setExampleDescription(gAllExamples->getExampleDescription(sCurrentHightlighted));
+		gui2->setExampleDescription(gAllExamples->getExampleDescription(sCurrentHightlighted));
 	}
 
 	void onButtonF(Gwen::Controls::Base* pControl)
@@ -538,26 +884,6 @@ struct MyMenuItemHander :public Gwen::Event::Handler
 
 
 
-};
-#include "Bullet3Common/b3HashMap.h"
-
-struct GL3TexLoader : public MyTextureLoader
-{
-	b3HashMap<b3HashString,GLint> m_hashMap;
-	
-	virtual void LoadTexture( Gwen::Texture* pTexture )
-	{
-		Gwen::String namestr = pTexture->name.Get();
-		const char* n = namestr.c_str();
-		GLint* texIdPtr = m_hashMap[n];
-		if (texIdPtr)
-		{
-			pTexture->m_intData = *texIdPtr;
-		}
-	}
-	virtual void FreeTexture( Gwen::Texture* pTexture )
-	{
-	}
 };
 
 void quitCallback()
@@ -588,10 +914,12 @@ struct QuickCanvas : public Common2dCanvasInterface
 	MyGraphWindow* m_gw[MAX_GRAPH_WINDOWS];
 	GraphingTexture* m_gt[MAX_GRAPH_WINDOWS];
 	int m_curNumGraphWindows;
+	int m_curXpos;
 
 	QuickCanvas(GL3TexLoader* myTexLoader)
 		:m_myTexLoader(myTexLoader),
-		m_curNumGraphWindows(0)
+		m_curNumGraphWindows(0),
+		m_curXpos(0)
 	{
 		for (int i=0;i<MAX_GRAPH_WINDOWS;i++)
 		{
@@ -612,10 +940,11 @@ struct QuickCanvas : public Common2dCanvasInterface
 			
 			m_curNumGraphWindows++;
 
-			MyGraphInput input(gui->getInternalData());
+			MyGraphInput input(gui2->getInternalData());
 			input.m_width=width;
 			input.m_height=height;
-			input.m_xPos = 10000;//GUI will clamp it to the right//300;
+			input.m_xPos = m_curXpos;//GUI will clamp it to the right//300;
+			m_curXpos+=width+20;
 			input.m_yPos = 10000;//GUI will clamp it to bottom
 			input.m_name=canvasName;
 			input.m_texName = canvasName;
@@ -631,8 +960,12 @@ struct QuickCanvas : public Common2dCanvasInterface
 	}
 	virtual void destroyCanvas(int canvasId)
 	{
+	    m_curXpos = 0;
 		btAssert(canvasId>=0);
+		delete m_gt[canvasId];
+		m_gt[canvasId] = 0;
 		destroyTextureWindow(m_gw[canvasId]);
+		m_gw[canvasId] = 0;
 		m_curNumGraphWindows--;
 	}
 	virtual void setPixel(int canvasId, int x, int y, unsigned char red, unsigned char green,unsigned char blue, unsigned char alpha)
@@ -658,14 +991,63 @@ struct QuickCanvas : public Common2dCanvasInterface
 
 OpenGLExampleBrowser::OpenGLExampleBrowser(class ExampleEntries* examples)
 {
+	m_internalData = new OpenGLExampleBrowserInternalData;
+
 	gAllExamples = examples;
 }
 
 OpenGLExampleBrowser::~OpenGLExampleBrowser()
 {
-    deleteDemo();
+	deleteDemo();
+	for (int i = 0; i < m_internalData->m_nodes.size(); i++)
+	{
+		delete m_internalData->m_nodes[i];
+	}
+	delete m_internalData->m_handler2;
+	for (int i = 0; i < m_internalData->m_handlers.size(); i++)
+	{
+		delete m_internalData->m_handlers[i];
+	}
+	m_internalData->m_handlers.clear();
+	m_internalData->m_nodes.clear();
+	delete s_parameterInterface;
+	s_parameterInterface = 0;
+	delete s_app->m_2dCanvasInterface;
+	s_app->m_2dCanvasInterface = 0;
+
+#ifndef BT_NO_PROFILE
+	destroyProfileWindow(m_internalData->m_profWindow);
+#endif
+
+	m_internalData->m_gui->exit();
+	
+
+
+
+	delete m_internalData->m_gui;
+	delete m_internalData->m_gwenRenderer;
+	delete m_internalData->m_myTexLoader;
+
+
+
+
+	
+	delete m_internalData->m_app;
+	s_app = 0;
+	
+	
+
+
+
+	delete m_internalData;
+    
+	gFileImporterByExtension.clear();
 	gAllExamples = 0;
+
+	
 }
+
+
 
 #include "EmptyExample.h"
 
@@ -674,9 +1056,24 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
     b3CommandLineArgs args(argc,argv);
     
 	loadCurrentSettings(startFileName, args);
+	if (args.CheckCmdLineFlag("nogui"))
+	{
+		renderGrid = false;
+		renderGui = false;
+	}
+	if (args.CheckCmdLineFlag("tracing"))
+	{
+		m_firstTiming = true;
+		gProfileDisabled = false;//true;
+		b3SetCustomEnterProfileZoneFunc(MyEnterProfileZoneFunc);
+		b3SetCustomLeaveProfileZoneFunc(MyLeaveProfileZoneFunc);
 
+		//also for Bullet 2.x API
+		btSetCustomEnterProfileZoneFunc(MyEnterProfileZoneFunc);
+		btSetCustomLeaveProfileZoneFunc(MyLeaveProfileZoneFunc);
+	}
 	args.GetCmdLineArgument("fixed_timestep",gFixedTimeStep);
-	
+	args.GetCmdLineArgument("png_skip_frames", gPngSkipFrames);	
 	///The OpenCL rigid body pipeline is experimental and 
 	///most OpenCL drivers and OpenCL compilers have issues with our kernels.
 	///If you have a high-end desktop GPU such as AMD 7970 or better, or NVIDIA GTX 680 with up-to-date drivers
@@ -687,6 +1084,7 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
 		enable_experimental_opencl = true;
 		gAllExamples->initOpenCLExampleEntries();
 	}
+	
 	if (args.CheckCmdLineFlag("disable_retina"))
 	{
 		gAllowRetina = false;
@@ -715,6 +1113,7 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
         s_app = new SimpleOpenGL2App(title,width,height);
         s_app->m_renderer = new SimpleOpenGL2Renderer(width,height);
     } 
+
 #ifndef NO_OPENGL3
 	else
     {
@@ -724,6 +1123,7 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
         s_app = simpleApp;
     }
 #endif
+	m_internalData->m_app = s_app;
     char* gVideoFileName = 0;
     args.GetCmdLineArgument("mp4",gVideoFileName);
    #ifndef NO_OPENGL3 
@@ -732,7 +1132,11 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
    #endif 
    
     s_instancingRenderer = s_app->m_renderer;
-	s_window  = s_app->m_window;
+    s_window  = s_app->m_window;
+
+    width = s_window->getWidth();
+    height = s_window->getHeight();
+    
 	prevMouseMoveCallback  = s_window->getMouseMoveCallback();
 	s_window->setMouseMoveCallback(MyMouseMoveCallback);
 	
@@ -772,59 +1176,82 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
 	b3SetCustomPrintfFunc(MyGuiPrintf);
 	b3SetCustomErrorMessageFunc(MyStatusBarError);
 	
+	
 
     assert(glGetError()==GL_NO_ERROR);
 	
+	{
+		GL3TexLoader* myTexLoader = new GL3TexLoader;
+		m_internalData->m_myTexLoader = myTexLoader;
 
-	gui = new GwenUserInterface;
-	GL3TexLoader* myTexLoader = new GL3TexLoader;
-    
-    Gwen::Renderer::Base* gwenRenderer = 0;
-    if (sUseOpenGL2 )
-    {
-        gwenRenderer = new Gwen::Renderer::OpenGL_DebugFont();
-    } 
+		
+		if (sUseOpenGL2)
+		{
+			m_internalData->m_gwenRenderer = new Gwen::Renderer::OpenGL_DebugFont();
+		}
 #ifndef NO_OPENGL3
-	else
-    {
-        sth_stash* fontstash=simpleApp->getFontStash();
-        gwenRenderer = new GwenOpenGL3CoreRenderer(simpleApp->m_primRenderer,fontstash,width,height,s_window->getRetinaScale(),myTexLoader);
-    }
+		else
+		{
+			sth_stash* fontstash = simpleApp->getFontStash();
+			m_internalData->m_gwenRenderer = new GwenOpenGL3CoreRenderer(simpleApp->m_primRenderer, fontstash, width, height, s_window->getRetinaScale(), myTexLoader);
+		}
 #endif
+
+		gui2 = new GwenUserInterface;
+		
+		m_internalData->m_gui = gui2;
+		
+		m_internalData->m_myTexLoader = myTexLoader;
+
+
+		
+		gui2->init(width, height, m_internalData->m_gwenRenderer, s_window->getRetinaScale());
+		
+		
+	}
+	//gui = 0;// new GwenUserInterface;
+	
+	GL3TexLoader* myTexLoader = m_internalData->m_myTexLoader;
+	// = myTexLoader;
+    
+    
+ 
 	//
 
-	gui->init(width,height,gwenRenderer,s_window->getRetinaScale());
-	
-	
-	
-	
-//	gui->getInternalData()->m_explorerPage
-	Gwen::Controls::TreeControl* tree = gui->getInternalData()->m_explorerTreeCtrl;
+	if (gui2)
+	{
+		
 
+
+
+
+		//	gui->getInternalData()->m_explorerPage
+		Gwen::Controls::TreeControl* tree = gui2->getInternalData()->m_explorerTreeCtrl;
+
+
+		//gui->getInternalData()->pRenderer->setTextureLoader(myTexLoader);
+
+#ifndef BT_NO_PROFILE
+		s_profWindow= setupProfileWindow(gui2->getInternalData());
+		m_internalData->m_profWindow = s_profWindow;
+		profileWindowSetVisible(s_profWindow,false);
+#endif //BT_NO_PROFILE
+		gui2->setFocus();
+
+		s_parameterInterface = s_app->m_parameterInterface = new GwenParameterInterface(gui2->getInternalData());
+		s_app->m_2dCanvasInterface = new QuickCanvas(myTexLoader);
 	
-	//gui->getInternalData()->pRenderer->setTextureLoader(myTexLoader);
-
-	
-	s_profWindow= setupProfileWindow(gui->getInternalData());
-	profileWindowSetVisible(s_profWindow,false);
-	gui->setFocus();
-
-	s_parameterInterface  = s_app->m_parameterInterface = new GwenParameterInterface(gui->getInternalData());
-	s_app->m_2dCanvasInterface = new QuickCanvas(myTexLoader);
-
 
 	///add some demos to the gAllExamples
 
-	
-	
-
+    
 	int numDemos = gAllExamples->getNumRegisteredExamples();
 
 	//char nodeText[1024];
 	//int curDemo = 0;
 	int selectedDemo = 0;
 	Gwen::Controls::TreeNode* curNode = tree;
-	MyMenuItemHander* handler2 = new MyMenuItemHander(-1);
+	m_internalData->m_handler2 = new MyMenuItemHander(-1);
 
 	char* demoNameFromCommandOption = 0;
 	args.GetCmdLineArgument("start_demo_name", demoNameFromCommandOption);
@@ -832,7 +1259,7 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
 		selectedDemo = -1;
 	}
 
-	tree->onReturnKeyDown.Add(handler2, &MyMenuItemHander::onButtonD);
+	tree->onReturnKeyDown.Add(m_internalData->m_handler2, &MyMenuItemHander::onButtonD);
 	int firstAvailableDemoIndex=-1;
 	Gwen::Controls::TreeNode* firstNode=0;
 
@@ -879,13 +1306,18 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
 				}
 			}
 
+#if 1
 			MyMenuItemHander* handler = new MyMenuItemHander(d);
+			m_internalData->m_handlers.push_back(handler);
+			
 			pNode->onNamePress.Add(handler, &MyMenuItemHander::onButtonA);
 			pNode->GetButton()->onDoubleClick.Add(handler, &MyMenuItemHander::onButtonB);
 			pNode->GetButton()->onDown.Add(handler, &MyMenuItemHander::onButtonC);
 			pNode->onSelect.Add(handler, &MyMenuItemHander::onButtonE);
 			pNode->onReturnKeyDown.Add(handler, &MyMenuItemHander::onButtonG);
 			pNode->onSelectChange.Add(handler, &MyMenuItemHander::onButtonF);
+			
+#endif
 //			pNode->onKeyReturn.Add(handler, &MyMenuItemHander::onButtonD);
 //			pNode->GetButton()->onKeyboardReturn.Add(handler, &MyMenuItemHander::onButtonD);
 	//		pNode->onNamePress.Add(handler, &MyMenuItemHander::onButtonD);
@@ -895,6 +1327,7 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
 		 else
 		 {
 			 curNode = tree->AddNode(nodeUText);
+			 m_internalData->m_nodes.push_back(curNode);
 		 }
 	}
 
@@ -913,6 +1346,9 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
 		}
 
 	}
+	free(demoNameFromCommandOption);
+	demoNameFromCommandOption = 0;
+
 	btAssert(sCurrentDemo!=0);
 	if (sCurrentDemo==0)
 	{
@@ -920,12 +1356,13 @@ bool OpenGLExampleBrowser::init(int argc, char* argv[])
 		exit(0);
 	}
 	
-    gui->registerFileOpenCallback(fileOpenCallback);
-	gui->registerQuitCallback(quitCallback);
-    
+    gui2->registerFileOpenCallback(fileOpenCallback);
+	gui2->registerQuitCallback(quitCallback);
+   }
+
+
 	return true;
 }
-
 
 
 CommonExampleInterface* OpenGLExampleBrowser::getCurrentExample()
@@ -941,7 +1378,9 @@ bool OpenGLExampleBrowser::requestedExit()
 
 void OpenGLExampleBrowser::update(float deltaTime)
 {
+	gProfileDisabled = false;
 
+		B3_PROFILE("OpenGLExampleBrowser::update");
 		assert(glGetError()==GL_NO_ERROR);
 		s_instancingRenderer->init();
         DrawGridData dg;
@@ -955,14 +1394,7 @@ void OpenGLExampleBrowser::update(float deltaTime)
             s_instancingRenderer->updateCamera(dg.upAxis);
         }
 
-		if (renderGrid)
-        {
-            BT_PROFILE("Draw Grid");
-			glPolygonOffset(3.0, 3);
-			glEnable(GL_POLYGON_OFFSET_FILL);
-            s_app->drawGrid(dg);
-			
-        }
+		
 		static int frameCount = 0;
 		frameCount++;
 
@@ -974,35 +1406,37 @@ void OpenGLExampleBrowser::update(float deltaTime)
             s_app->drawText(bla,10,10);
 		}
 
+    if (gPngFileName)
+    {
+        
+        static int skip = 0;
+        skip--;
+        if (skip<0)
+        {
+            skip=gPngSkipFrames;
+            //printf("gPngFileName=%s\n",gPngFileName);
+            static int s_frameCount = 100;
+            
+            sprintf(staticPngFileName,"%s%d.png",gPngFileName,s_frameCount++);
+            //b3Printf("Made screenshot %s",staticPngFileName);
+            s_app->dumpNextFrameToPng(staticPngFileName);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
+    }
+
 		
 		if (sCurrentDemo)
 		{
-			if (!pauseSimulation)
+			if (!pauseSimulation || singleStepSimulation)
 			{
+				
 				//printf("---------------------------------------------------\n");
 				//printf("Framecount = %d\n",frameCount);
-
-				if (gPngFileName)
-				{
-					
-					static int skip = 0;
-					skip++;
-					if (skip>4)
-					{
-						skip=0;
-						//printf("gPngFileName=%s\n",gPngFileName);
-						static int s_frameCount = 100;
-						
-						sprintf(staticPngFileName,"%s%d.png",gPngFileName,s_frameCount++);
-						//b3Printf("Made screenshot %s",staticPngFileName);
-						s_app->dumpNextFrameToPng(staticPngFileName);
-						 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
-					}
-				}
-				
+				B3_PROFILE("sCurrentDemo->stepSimulation");
 
 				if (gFixedTimeStep>0)
 				{
+				
 					sCurrentDemo->stepSimulation(gFixedTimeStep);
 				} else
 				{
@@ -1010,6 +1444,14 @@ void OpenGLExampleBrowser::update(float deltaTime)
 				}
 			}
 			
+			if (renderGrid)
+            {
+                BT_PROFILE("Draw Grid");
+                glPolygonOffset(3.0, 3);
+                glEnable(GL_POLYGON_OFFSET_FILL);
+                s_app->drawGrid(dg);
+                
+            }
 			if (renderVisualGeometry && ((gDebugDrawFlags&btIDebugDraw::DBG_DrawWireframe)==0))
             {
 				if (visualWireframe)
@@ -1019,17 +1461,21 @@ void OpenGLExampleBrowser::update(float deltaTime)
                 BT_PROFILE("Render Scene");
                 sCurrentDemo->renderScene();
             }
+			//else
             {
-				
+				B3_PROFILE("physicsDebugDraw");
 				glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
                 sCurrentDemo->physicsDebugDraw(gDebugDrawFlags);
             }
 		}
 
+    
+
 		{
 			
-			if (s_guiHelper && s_guiHelper->getRenderInterface() && s_guiHelper->getRenderInterface()->getActiveCamera())
+			if (gui2 && s_guiHelper && s_guiHelper->getRenderInterface() && s_guiHelper->getRenderInterface()->getActiveCamera())
 			{
+				B3_PROFILE("setStatusBarMessage");
 				char msg[1024];
 				float camDist = s_guiHelper->getRenderInterface()->getActiveCamera()->getCameraDistance();
 				float pitch = s_guiHelper->getRenderInterface()->getActiveCamera()->getCameraPitch();
@@ -1037,7 +1483,7 @@ void OpenGLExampleBrowser::update(float deltaTime)
 				float camTarget[3];
 				s_guiHelper->getRenderInterface()->getActiveCamera()->getCameraTargetPosition(camTarget);
 				sprintf(msg,"dist=%f, pitch=%f, yaw=%f,target=%f,%f,%f", camDist,pitch,yaw,camTarget[0],camTarget[1],camTarget[2]);
-				gui->setStatusBarMessage(msg, true);	
+				gui2->setStatusBarMessage(msg, true);	
 			}
 			
 		}
@@ -1045,16 +1491,34 @@ void OpenGLExampleBrowser::update(float deltaTime)
 		static int toggle = 1;
 		if (renderGui)
 		{
-            if (!pauseSimulation)
-                processProfileData(s_profWindow,false);
+			B3_PROFILE("renderGui");
+#ifndef BT_NO_PROFILE
 
-            if (sUseOpenGL2)
+			if (!pauseSimulation || singleStepSimulation)
 			{
-					
-				saveOpenGLState(s_instancingRenderer->getScreenWidth(),s_instancingRenderer->getScreenHeight());
+				if (isProfileWindowVisible(s_profWindow))
+				{
+				    processProfileData(s_profWindow,false);
+				}
 			}
-            BT_PROFILE("Draw Gwen GUI");
-            gui->draw(s_instancingRenderer->getScreenWidth(),s_instancingRenderer->getScreenHeight());
+#endif //#ifndef BT_NO_PROFILE
+
+			
+			if (sUseOpenGL2)
+			{
+
+				saveOpenGLState(s_instancingRenderer->getScreenWidth(), s_instancingRenderer->getScreenHeight());
+			}
+			
+			if (m_internalData->m_gui)
+			{
+				gBlockGuiMessages = true;
+				m_internalData->m_gui->draw(s_instancingRenderer->getScreenWidth(), s_instancingRenderer->getScreenHeight());
+				
+
+				gBlockGuiMessages = false;
+			}
+			
             if (sUseOpenGL2)
             {
                 restoreOpenGLState();
@@ -1062,19 +1526,32 @@ void OpenGLExampleBrowser::update(float deltaTime)
 
 		}
 	
-	
+	singleStepSimulation = false;
 	
 				
 		toggle=1-toggle;
         {
             BT_PROFILE("Sync Parameters");
-            s_parameterInterface->syncParameters();
+			if (s_parameterInterface)
+			{
+				s_parameterInterface->syncParameters();
+			}
         }
         {
             BT_PROFILE("Swap Buffers");
             s_app->swapBuffer();
         }
 	
-		gui->forceUpdateScrollBars();
+		if (gui2)
+		{
+			B3_PROFILE("forceUpdateScrollBars");
+			gui2->forceUpdateScrollBars();
+		}
 
+}
+
+void OpenGLExampleBrowser::setSharedMemoryInterface(class SharedMemoryInterface* sharedMem)
+{
+	gDisableDemoSelection = true;
+	sSharedMem = sharedMem;
 }
