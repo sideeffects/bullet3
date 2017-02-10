@@ -824,7 +824,7 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
                 }
             }
             
-            cfm *= invTimeStep;
+            //cfm *= invTimeStep;
             
 
 			btVector3 torqueAxis0 = rel_pos1.cross(cp.m_normalWorldOnB);
@@ -959,7 +959,7 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
 						solverConstraint.m_rhs = velocityImpulse;
 						solverConstraint.m_rhsPenetration = penetrationImpulse;
 					}
-					solverConstraint.m_cfm = cfm*solverConstraint.m_jacDiagABInv;
+					solverConstraint.m_cfm = cfm;//*solverConstraint.m_jacDiagABInv;
 					solverConstraint.m_lowerLimit = 0;
 					solverConstraint.m_upperLimit = 1e10f;
 				}
