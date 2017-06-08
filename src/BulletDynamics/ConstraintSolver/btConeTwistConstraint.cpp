@@ -929,12 +929,11 @@ void btConeTwistConstraint::computeConeLimitInfo(const btQuaternion& qCone,
 		swingLimit = m_swingSpan1 * sinphi/sinalpha;
 		}*/
 	}
-	else if (swingAngle < 0)
+	else
 	{
-		// this should never happen!
-#if 0
-        btAssert(0);
-#endif
+            // Don't need to enforce a swing limit.
+            swingLimit = BT_LARGE_FLOAT;
+            vSwingAxis = btVector3(0, 0, 0);
  	}
 }
 
