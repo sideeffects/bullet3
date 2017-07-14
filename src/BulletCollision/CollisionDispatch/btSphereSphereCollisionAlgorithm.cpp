@@ -89,9 +89,7 @@ void btSphereSphereCollisionAlgorithm::processCollision (const btCollisionObject
 	
 	resultOut->addContactPoint(normalOnSurfaceB,pos1,dist);
 
-#ifndef CLEAR_MANIFOLD
 	resultOut->refreshContactPoints();
-#endif //CLEAR_MANIFOLD
 
 }
 
