@@ -22,6 +22,7 @@ subject to the following restrictions:
 #include "btGImpactShape.h"
 #include "btGImpactMassUtil.h"
 
+#define BT_THREADSAFE 1
 
 btGImpactMeshShapePart::btGImpactMeshShapePart( btStridingMeshInterface * meshInterface, int part )
 {

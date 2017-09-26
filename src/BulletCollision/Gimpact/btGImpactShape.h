@@ -39,11 +39,6 @@ subject to the following restrictions:
 
 #include "btGImpactQuantizedBvh.h" // box tree class
 
-#ifdef _WIN32
-#include "BulletMultiThreaded/Win32ThreadSupport.h"
-#else
-#include "BulletMultiThreaded/PosixThreadSupport.h"
-#endif
 
 //! declare Quantized trees, (you can change to float based trees)
 typedef btGImpactQuantizedBvh btGImpactBoxSet;
@@ -557,9 +552,6 @@ public:
 		int  numfaces;
 		PHY_ScalarType indicestype;
 
-                btThreadSupportInterface *m_threadSupport;
-                btCriticalSection *m_lock;
-
 		TrimeshPrimitiveManager()
 		{
 			m_meshInterface = NULL;
@@ -573,8 +565,6 @@ public:
 			indexbase = 0;
 			indexstride = 0;
 			numfaces = 0;
-
-                        buildThreadSupport();
 		}
 
  		TrimeshPrimitiveManager(const TrimeshPrimitiveManager & manager)
@@ -592,7 +582,6 @@ public:
 			indexstride = 0;
 			numfaces = 0;
 
-                        buildThreadSupport();
 		}
 
 		TrimeshPrimitiveManager(
@@ -610,51 +599,35 @@ public:
 			indexstride = 0;
 			numfaces = 0;
 
-                        buildThreadSupport();
 		}
 
-		virtual ~TrimeshPrimitiveManager()
-                {
-                    m_threadSupport->deleteCriticalSection(m_lock);
-                    delete m_threadSupport;
-                }
+		virtual ~TrimeshPrimitiveManager() {}
 
 		void lock()
 		{
-                        m_lock->lock();
-
 			if(m_lock_count>0)
 			{
 				m_lock_count++;
+				return;
 			}
-                        else
-                        {
-                            m_meshInterface->getLockedReadOnlyVertexIndexBase(
-                                    &vertexbase,numverts,
-                                    type, stride,&indexbase, indexstride, numfaces,indicestype,m_part);
+			m_meshInterface->getLockedReadOnlyVertexIndexBase(
+				&vertexbase,numverts,
+				type, stride,&indexbase, indexstride, numfaces,indicestype,m_part);
 
-                            m_lock_count = 1;
-                        }
-
-                        m_lock->unlock();
+			m_lock_count = 1;
 		}
 
 		void unlock()
 		{
-                        m_lock->lock();
-
+			if(m_lock_count == 0) return;
 			if(m_lock_count>1)
 			{
 				--m_lock_count;
+				return;
 			}
-                        else if (m_lock_count == 1)
-                        {
-                                m_meshInterface->unLockReadOnlyVertexBase(m_part);
-                                vertexbase = NULL;
-                                m_lock_count = 0;
-                        }
-
-                        m_lock->unlock();
+			m_meshInterface->unLockReadOnlyVertexBase(m_part);
+			vertexbase = NULL;
+			m_lock_count = 0;
 		}
 
 		virtual bool is_trimesh() const
@@ -736,19 +709,6 @@ public:
 			get_vertex(indices[2],triangle.m_vertices1[2]);
 			triangle.setMargin(m_margin);
 		}
-
-        private:
-                void buildThreadSupport()
-                {
-#ifdef _WIN32
-                    Win32ThreadSupport::Win32ThreadConstructionInfo cinfo("TrimeshPrimitiveManager", 0, 0, 0);
-                    m_threadSupport = new Win32ThreadSupport(cinfo);
-#else
-                    PosixThreadSupport::ThreadConstructionInfo cinfo("TrimeshPrimitiveManager", 0, 0, 0);
-                    m_threadSupport = new PosixThreadSupport(cinfo);
-#endif
-                    m_lock = m_threadSupport->createCriticalSection();
-                }
 
 	};
 
