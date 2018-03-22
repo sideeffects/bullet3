@@ -150,6 +150,11 @@ public:
 
 		//damping of the velocity
 		btScalar	m_damping;
+
+                // For now, allow constraints to opt in to the correct CFM
+                // behaviour when setting up and solving the system, until we
+                // decide what to do about backwards compatibility.
+                bool m_enableLegacyCfmBehavior;
 	};
 
 	int	getOverrideNumSolverIterations() const

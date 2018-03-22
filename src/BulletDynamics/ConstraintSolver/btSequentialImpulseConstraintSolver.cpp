@@ -796,6 +796,7 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
             //erp = dt * kp / ( dt * kp + kd )
             
             btScalar cfm = infoGlobal.m_globalCfm;
+            bool legacy_cfm_behavior = true;
             btScalar erp = infoGlobal.m_erp2;
 
             btScalar penetration = cp.getDistance()+infoGlobal.m_linearSlop;
@@ -810,6 +811,8 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
                     cfm  = cp.m_contactCFM;
                 if (cp.m_contactPointFlags&BT_CONTACT_FLAG_HAS_CONTACT_ERP)
                     erp = cp.m_contactERP;                
+
+                legacy_cfm_behavior = false;
             } else
             {
                 if (cp.m_contactPointFlags & BT_CONTACT_FLAG_CONTACT_STIFFNESS_DAMPING)
@@ -821,10 +824,13 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
                     }
                     cfm = btScalar(1) / denom; 
                     erp = (infoGlobal.m_timeStep * cp.m_combinedContactStiffness1) / denom;
+
+                    legacy_cfm_behavior = false;
                 }
             }
             
-            //cfm *= invTimeStep;
+            if (!legacy_cfm_behavior)
+                cfm *= invTimeStep;
             
 
 			btVector3 torqueAxis0 = rel_pos1.cross(cp.m_normalWorldOnB);
@@ -959,7 +965,12 @@ void btSequentialImpulseConstraintSolver::setupContactConstraint(btSolverConstra
 						solverConstraint.m_rhs = velocityImpulse;
 						solverConstraint.m_rhsPenetration = penetrationImpulse;
 					}
-					solverConstraint.m_cfm = cfm;//*solverConstraint.m_jacDiagABInv;
+
+                                        if (legacy_cfm_behavior)
+                                            solverConstraint.m_cfm = cfm;
+                                        else
+                                            solverConstraint.m_cfm = cfm*solverConstraint.m_jacDiagABInv;
+
 					solverConstraint.m_lowerLimit = 0;
 					solverConstraint.m_upperLimit = 1e10f;
 				}
@@ -1370,6 +1381,8 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlySetup(btCol
 			///setup the btSolverConstraints
 			int currentRow = 0;
 
+                        const btScalar invTimeStep = btScalar(1.0) / infoGlobal.m_timeStep;
+
 			for (i=0;i<numConstraints;i++)
 			{
 				const btTypedConstraint::btConstraintInfo1& info1 = m_tmpConstraintSizesPool[i];
@@ -1421,7 +1434,7 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlySetup(btCol
 
 
 					btTypedConstraint::btConstraintInfo2 info2;
-					info2.fps = 1.f/infoGlobal.m_timeStep;
+					info2.fps = invTimeStep;
 					info2.erp = infoGlobal.m_erp;
 					info2.m_J1linearAxis = currentConstraintRow->m_contactNormal1;
 					info2.m_J1angularAxis = currentConstraintRow->m_relpos1CrossNormal;
@@ -1437,6 +1450,7 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlySetup(btCol
 					info2.m_lowerLimit = &currentConstraintRow->m_lowerLimit;
 					info2.m_upperLimit = &currentConstraintRow->m_upperLimit;
 					info2.m_numIterations = infoGlobal.m_numIterations;
+                                        info2.m_enableLegacyCfmBehavior = true;
 					constraints[i]->getInfo2(&info2);
 
 					///finalize the constraint setup
@@ -1453,6 +1467,9 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlySetup(btCol
 						{
 							solverConstraint.m_lowerLimit = -constraints[i]->getBreakingImpulseThreshold();
 						}
+
+                                                if (!info2.m_enableLegacyCfmBehavior)
+                                                    solverConstraint.m_cfm *= invTimeStep;
 
 						solverConstraint.m_originalContactPoint = constraint;
 
@@ -1475,6 +1492,8 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlySetup(btCol
 							sum += iMJaA.dot(solverConstraint.m_relpos1CrossNormal);
 							sum += iMJlB.dot(solverConstraint.m_contactNormal2);
 							sum += iMJaB.dot(solverConstraint.m_relpos2CrossNormal);
+                                                        if (!info2.m_enableLegacyCfmBehavior)
+                                                            sum += solverConstraint.m_cfm;
 							btScalar fsum = btFabs(sum);
 							btAssert(fsum > SIMD_EPSILON);
 							solverConstraint.m_jacDiagABInv = fsum>SIMD_EPSILON?btScalar(1.)/sum : 0.f;
@@ -1504,8 +1523,8 @@ btScalar btSequentialImpulseConstraintSolver::solveGroupCacheFriendlySetup(btCol
 							btScalar	velocityImpulse = velocityError *solverConstraint.m_jacDiagABInv;
 							solverConstraint.m_rhs = penetrationImpulse+velocityImpulse;
 							solverConstraint.m_appliedImpulse = 0.f;
-
-
+                                                        if (!info2.m_enableLegacyCfmBehavior)
+                                                            solverConstraint.m_cfm *= solverConstraint.m_jacDiagABInv;
 						}
 					}
 				}
