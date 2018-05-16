@@ -4,10 +4,6 @@ IF(BUILD_BULLET3)
 	SUBDIRS(  BulletInverseDynamics  )
 ENDIF(BUILD_BULLET3)
 
-IF (BUILD_MULTITHREADING)
-    SUBDIRS( BulletMultiThreaded )
-ENDIF ()
-
 SUBDIRS(  BulletSoftBody BulletCollision BulletDynamics LinearMath )
 
 
@@ -18,14 +14,6 @@ IF(INSTALL_LIBS)
 			# Don't actually need to install any common files, the frameworks include everything
 		ELSE (APPLE AND BUILD_SHARED_LIBS AND FRAMEWORK)
 			INSTALL(FILES btBulletCollisionCommon.h btBulletDynamicsCommon.h  DESTINATION ${INCLUDE_INSTALL_DIR})
-			INSTALL(FILES vectormath/vmInclude.h DESTINATION ${INCLUDE_INSTALL_DIR}/vectormath)
-			INSTALL(FILES vectormath/scalar/boolInVec.h
-					vectormath/scalar/floatInVec.h
-					vectormath/scalar/mat_aos.h
-					vectormath/scalar/quat_aos.h
-					vectormath/scalar/vec_aos.h
-					vectormath/scalar/vectormath_aos.h
-				DESTINATION ${INCLUDE_INSTALL_DIR}/vectormath/scalar)
 		ENDIF (APPLE AND BUILD_SHARED_LIBS AND FRAMEWORK)
 	ENDIF (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 2.5)
 ENDIF(INSTALL_LIBS)
