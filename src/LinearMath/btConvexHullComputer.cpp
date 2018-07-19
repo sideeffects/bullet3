@@ -2649,6 +2649,7 @@ btScalar btConvexHullComputer::compute(const void* coords, bool doubleCoords, in
 		vertices.clear();
 		edges.clear();
 		faces.clear();
+                vertex_sources.clear();
 		return 0;
 	}
 
@@ -2661,12 +2662,14 @@ btScalar btConvexHullComputer::compute(const void* coords, bool doubleCoords, in
 		vertices.clear();
 		edges.clear();
 		faces.clear();
+                vertex_sources.clear();
 		return shift;
 	}
 
 	vertices.resize(0);
 	edges.resize(0);
 	faces.resize(0);
+        vertex_sources.resize(0);
 
 	btAlignedObjectArray<btConvexHullInternal::Vertex*> oldVertices;
 	getVertexCopy(hull.vertexList, oldVertices);
@@ -2675,6 +2678,7 @@ btScalar btConvexHullComputer::compute(const void* coords, bool doubleCoords, in
 	{
 		btConvexHullInternal::Vertex* v = oldVertices[copied];
 		vertices.push_back(hull.getCoordinates(v));
+                vertex_sources.push_back(v->point.index);
 		btConvexHullInternal::Edge* firstEdge = v->edges;
 		if (firstEdge)
 		{

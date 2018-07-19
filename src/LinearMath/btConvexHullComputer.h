@@ -74,6 +74,9 @@ class btConvexHullComputer
 		// Faces of the convex hull. Each entry is an index into the "edges" array pointing to an edge of the face. Faces are planar n-gons
 		btAlignedObjectArray<int> faces;
 
+                // Source index of each vertex in the output hull.
+		btAlignedObjectArray<int> vertex_sources;
+
 		/*
 		Compute convex hull of "count" vertices stored in "coords". "stride" is the difference in bytes
 		between the addresses of consecutive vertices. If "shrink" is positive, the convex hull is shrunken
