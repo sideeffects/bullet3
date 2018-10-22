@@ -387,7 +387,8 @@ void btSimulationIslandManager::buildAndProcessIslands(btDispatcher* dispatcher,
 	{
 		btPersistentManifold** manifold = dispatcher->getInternalManifoldPointer();
 		int maxNumManifolds = dispatcher->getNumManifolds();
-		callback->processIsland(&collisionObjects[0],collisionObjects.size(),manifold,maxNumManifolds, -1);
+                btCollisionObject **objects_array = collisionObjects.size() ? &collisionObjects[0] : nullptr;
+		callback->processIsland(objects_array,collisionObjects.size(),manifold,maxNumManifolds, -1);
 	}
 	else
 	{
